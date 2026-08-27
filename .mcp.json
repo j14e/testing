@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "npres-mcp": {
+      "type": "http",
+      "url": "https://npres-mcp-v2.vercel.app/mcp"
+    }
+  }
+}
