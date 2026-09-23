@@ -1,0 +1,6 @@
+huggingface_hub
+transformers
+# Only needed when the model repo does not publish ONNX weights:
+torch
+optimum-onnx[onnxruntime]
+onnxconverter-common

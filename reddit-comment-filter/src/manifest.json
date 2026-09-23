@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Reddit Comment Filter",
+  "version": "0.1.0",
+  "description": "Scores long Reddit posts and comments with a local RoBERTa classifier (WebGPU/WASM) and lets you hide them.",
+  "minimum_chrome_version": "116",
+  "permissions": ["offscreen", "storage"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*.reddit.com/*", "https://reddit.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
+  "cross_origin_embedder_policy": { "value": "require-corp" },
+  "cross_origin_opener_policy": { "value": "same-origin" }
+}

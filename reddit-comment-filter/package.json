@@ -1,0 +1,20 @@
+{
+  "name": "reddit-comment-filter",
+  "version": "0.1.0",
+  "description": "Chrome extension that scores long Reddit posts/comments with a local RoBERTa classifier (transformers.js, WebGPU/WASM).",
+  "scripts": {
+    "build": "node build.mjs",
+    "build:test": "node build.mjs --outdir dist-test --model-id local-test/tiny-roberta --models-dir test/.models --local-only",
+    "test:model": "python3 test/make_test_model.py",
+    "test": "npm run build:test && node test/e2e.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "playwright": "^1.56.1"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.3.0"
+  },
+  "private": true,
+  "type": "module"
+}

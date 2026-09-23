@@ -1,0 +1,52 @@
+.rcf-badge {
+  all: unset;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  margin: 0 4px;
+  padding: 0 7px;
+  border-radius: 9px;
+  font: 600 11px/18px system-ui, -apple-system, 'Segoe UI', sans-serif;
+  white-space: nowrap;
+  vertical-align: middle;
+  color: #fff;
+  background: #6e7781;
+  cursor: pointer;
+  /* Sit above the full-card link overlay on feed posts. */
+  position: relative;
+  z-index: 3;
+}
+.rcf-badge:disabled {
+  cursor: default;
+}
+.rcf-badge:focus-visible {
+  outline: 2px solid #0969da;
+  outline-offset: 1px;
+}
+.rcf-badge[data-rcf-level='low'] {
+  background: #1f883d;
+}
+.rcf-badge[data-rcf-level='mid'] {
+  background: #9a6700;
+}
+.rcf-badge[data-rcf-level='high'] {
+  background: #cf222e;
+}
+.rcf-badge[data-rcf-level='error'] {
+  background: #57606a;
+}
+.rcf-badge.rcf-blocked {
+  box-shadow: inset 0 0 0 2px rgba(0, 0, 0, 0.35);
+  text-decoration: line-through;
+}
+
+.rcf-hidden {
+  display: none !important;
+}
+.rcf-placeholder {
+  margin: 4px 0;
+  font: italic 12px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: #6e7781;
+  cursor: pointer;
+}
