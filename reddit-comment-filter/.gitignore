@@ -6,3 +6,4 @@ models/
 test/.models/
 test/.artifacts/
 __pycache__/
+test/.cache/

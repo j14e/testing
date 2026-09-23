@@ -4,9 +4,9 @@ loads from the extension package, so inference never needs the network:
 
     models/<org>/<name>/
         config.json, tokenizer.json, tokenizer_config.json, ...
-        onnx/model_fp16.onnx        WebGPU (GPUs with shader-f16)
-        onnx/model.onnx             WebGPU fallback (fp32, only with --dtypes fp32)
-        onnx/model_quantized.onnx   WASM (int8)
+        onnx/model_fp16.onnx        WebGPU and WASM (default)
+        onnx/model.onnx             fp32: WebGPU on GPUs without shader-f16 (--dtypes fp16,fp32)
+        onnx/model_quantized.onnx   int8: smaller/faster WASM, but less accurate (--dtypes q8)
 
 ONNX files the repo already publishes are downloaded as-is. Missing ones are
 exported from the PyTorch/safetensors weights with optimum and then converted
@@ -139,8 +139,8 @@ def main() -> int:
     parser.add_argument("--revision", default=None, help="Hub branch, tag or commit")
     parser.add_argument(
         "--dtypes",
-        default="fp16,q8",
-        help="comma-separated subset of fp16,q8,fp32 (default: fp16,q8)",
+        default="fp16",
+        help="comma-separated subset of fp16,q8,fp32 (default: fp16)",
     )
     parser.add_argument(
         "--out",
@@ -170,6 +170,8 @@ def main() -> int:
     if missing:
         convert(args.model, out, missing, args.revision)
     ensure_fast_tokenizer(args.model if not is_local else str(Path(args.model)), out, args.revision)
+    # hf_hub_download(local_dir=...) leaves download metadata here; keep it out of the extension.
+    shutil.rmtree(out / ".cache", ignore_errors=True)
 
     print(f"\nmodel ready in {out}")
     for f in sorted(out.rglob("*")):

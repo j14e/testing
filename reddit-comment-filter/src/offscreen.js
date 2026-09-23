@@ -50,7 +50,10 @@ async function isBundled(dtype) {
   }
 }
 
-// Ordered (device, dtype) pairs to try: WebGPU fp16 > WebGPU fp32 > WASM int8.
+// Ordered (device, dtype) pairs to try. fp16 comes first on both backends:
+// WASM runs the fp16 graph about as fast as fp32 and within ~0.002 of it,
+// while int8 (q8) is ~2x faster but moved real Reddit comments' scores by up
+// to 0.58 for this detector, so it is only a last resort.
 async function backendCandidates() {
   const wanted = [];
   if (DEVICE_PREF !== 'wasm') {
@@ -62,14 +65,16 @@ async function backendCandidates() {
       status.attempts.push('webgpu: no adapter');
     }
   }
-  if (DEVICE_PREF !== 'webgpu') wanted.push({ device: 'wasm', dtype: 'q8' });
+  if (DEVICE_PREF !== 'webgpu') {
+    wanted.push({ device: 'wasm', dtype: 'fp16' }, { device: 'wasm', dtype: 'fp32' }, { device: 'wasm', dtype: 'q8' });
+  }
 
   const bundled = [];
   for (const c of wanted) if (await isBundled(c.dtype)) bundled.push(c);
   if (bundled.length) return { candidates: bundled, bundled: true };
-  // Nothing packaged: download from the Hub, but never the ~500 MB fp32 graph.
+  // Nothing packaged: download the fp16 graph from the Hub (never the ~500 MB fp32 one).
   return {
-    candidates: CONFIG.allowRemoteModels ? wanted.filter((c) => c.dtype !== 'fp32') : [],
+    candidates: CONFIG.allowRemoteModels ? wanted.filter((c) => c.dtype === 'fp16') : [],
     bundled: false,
   };
 }
@@ -127,7 +132,16 @@ function getEngine() {
 
 async function classify(texts) {
   const engine = await getEngine();
-  const outputs = await engine.clf(texts, { top_k: null });
+  let outputs;
+  if (engine.dtype === 'q8') {
+    // int8 models quantize activations with one scale per batch, so padding
+    // and the other texts would shift each score. On CPU, batching buys little
+    // anyway: run one text at a time.
+    outputs = [];
+    for (const text of texts) outputs.push(...(await engine.clf([text], { top_k: null })));
+  } else {
+    outputs = await engine.clf(texts, { top_k: null });
+  }
   status.classified += texts.length;
   return outputs.map((scores) => {
     const best = scores

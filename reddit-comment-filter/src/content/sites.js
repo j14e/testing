@@ -82,9 +82,27 @@ export function readItem(el) {
   return info?.textEl ? info : null;
 }
 
+// Quotes, code and tables are left out: the detector was trained on text with
+// them stripped (its model card's clean_text), and they aren't the author's
+// own prose anyway.
+const SKIP = 'blockquote, pre, code, table, script, style, .rcf-badge, .rcf-placeholder';
+const BREAKS = /^(p|div|li|ul|ol|h[1-6]|br|hr|tr)$/;
+
+function proseText(root) {
+  const parts = [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => (n.nodeType === Node.ELEMENT_NODE && n.matches(SKIP) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+  });
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    if (n.nodeType === Node.TEXT_NODE) parts.push(n.data);
+    else if (BREAKS.test(n.localName)) parts.push(' ');
+  }
+  // Same whitespace handling as clean_text: one line, single spaces.
+  return parts.join('').replace(/\s+/g, ' ').replace(/ ,/g, ',').trim();
+}
+
 export function itemText(info) {
-  const body = (info.textEl.innerText || info.textEl.textContent || '').trim();
-  return [info.title.trim(), body].filter(Boolean).join('\n\n');
+  return [info.title.replace(/\s+/g, ' ').trim(), proseText(info.textEl)].filter(Boolean).join(' ');
 }
 
 // Words = whitespace-separated runs containing a letter or digit, so emoji,

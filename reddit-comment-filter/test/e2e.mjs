@@ -136,7 +136,7 @@ async function runDevice(device) {
       assert.equal(status.state, 'ready', status.error);
       assert.equal(status.device, device);
       assert.equal(status.modelClass, 'RobertaForSequenceClassification');
-      assert.equal(status.dtype, device === 'wasm' ? 'q8' : status.dtype);
+      if (device === 'wasm') assert.equal(status.dtype, 'fp16');
       assert.ok(status.crossOriginIsolated, 'offscreen document is not cross-origin isolated');
       if (device === 'wasm') assert.ok(status.numThreads > 1, `WASM runs single-threaded (${status.numThreads})`);
     });
