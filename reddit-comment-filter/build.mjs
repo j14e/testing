@@ -1,9 +1,12 @@
 // Builds the unpacked extension into dist/ (load it from chrome://extensions).
 //
-//   node build.mjs [--outdir dist] [--model-id org/name] [--models-dir models] [--local-only]
+//   node build.mjs [--outdir dist] [--model-id org/name] [--models-dir models] [--local-only] [--split-mb 95]
 //
 // Model files are hard-linked (not copied) from <models-dir>/<model-id>/ into
-// <outdir>/models/, so rebuilding doesn't duplicate hundreds of MB.
+// <outdir>/models/, so rebuilding doesn't duplicate hundreds of MB. Files
+// larger than --split-mb are written as <file>.partNN pieces plus
+// <file>.parts.json instead, so the built extension fits in a Git repository
+// (GitHub rejects files over 100 MB); the offscreen document joins them.
 
 import * as esbuild from 'esbuild';
 import fs from 'node:fs';
@@ -18,6 +21,7 @@ const { values: opts } = parseArgs({
     'model-id': { type: 'string', default: process.env.RCF_MODEL_ID || '' },
     'models-dir': { type: 'string', default: 'models' },
     'local-only': { type: 'boolean', default: process.env.RCF_LOCAL_ONLY === '1' },
+    'split-mb': { type: 'string', default: '95' },
   },
 });
 const outdir = path.resolve(root, opts.outdir);
@@ -64,12 +68,31 @@ for (const ext of ['mjs', 'wasm']) {
   fs.copyFileSync(path.join(ortDist, name), path.join(outdir, 'ort', name));
 }
 
+const splitBytes = Math.round(Number(opts['split-mb']) * 1024 * 1024);
+
+function splitFile(a, b) {
+  const size = fs.statSync(a).size;
+  const fd = fs.openSync(a, 'r');
+  const parts = [];
+  for (let off = 0, i = 0; off < size; off += splitBytes, i++) {
+    const len = Math.min(splitBytes, size - off);
+    const buf = Buffer.alloc(len);
+    fs.readSync(fd, buf, 0, len, off);
+    const name = `${path.basename(b)}.part${String(i).padStart(2, '0')}`;
+    fs.writeFileSync(path.join(path.dirname(b), name), buf);
+    parts.push(name);
+  }
+  fs.closeSync(fd);
+  fs.writeFileSync(`${b}.parts.json`, JSON.stringify({ size, parts }));
+}
+
 function linkTree(from, to) {
   fs.mkdirSync(to, { recursive: true });
   for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
     const a = path.join(from, entry.name);
     const b = path.join(to, entry.name);
     if (entry.isDirectory()) linkTree(a, b);
+    else if (entry.name.endsWith('.onnx') && fs.statSync(a).size > splitBytes) splitFile(a, b);
     else {
       try {
         fs.linkSync(a, b);

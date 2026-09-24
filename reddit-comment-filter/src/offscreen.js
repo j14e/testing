@@ -14,6 +14,34 @@ const MODEL_FILES = { fp32: 'model.onnx', fp16: 'model_fp16.onnx', q8: 'model_qu
 
 env.allowLocalModels = true;
 env.localModelPath = chrome.runtime.getURL('models/');
+
+// build.mjs splits model files over GitHub's 100 MB limit into
+// <file>.part00, .part01, ... plus <file>.parts.json. Serve such a file by
+// streaming its parts back to back, so the rest of the code sees one file.
+const baseFetch = env.fetch;
+async function partsManifest(url) {
+  try {
+    const res = await baseFetch(`${url}.parts.json`);
+    return res.ok ? await res.json() : null;
+  } catch {
+    return null; // missing extension resources reject rather than 404
+  }
+}
+env.fetch = async (input, init) => {
+  const url = String(input);
+  const manifest = url.startsWith(env.localModelPath) && url.endsWith('.onnx') ? await partsManifest(url) : null;
+  if (!manifest) return baseFetch(input, init);
+  const dir = url.slice(0, url.lastIndexOf('/') + 1);
+  let next = 0;
+  const body = new ReadableStream({
+    async pull(controller) {
+      if (next === manifest.parts.length) return controller.close();
+      const res = await baseFetch(dir + manifest.parts[next++]);
+      controller.enqueue(new Uint8Array(await res.arrayBuffer()));
+    },
+  });
+  return new Response(body, { headers: { 'content-length': String(manifest.size) } });
+};
 env.allowRemoteModels = CONFIG.allowRemoteModels;
 // ONNX Runtime ships inside the extension (MV3 forbids remote code), so point
 // it at the packaged files instead of the default CDN.
@@ -44,6 +72,7 @@ const status = {
 
 async function isBundled(dtype) {
   const url = `${env.localModelPath}${CONFIG.modelId}/onnx/${MODEL_FILES[dtype]}`;
+  if (await partsManifest(url)) return true;
   try {
     return (await fetch(url, { method: 'HEAD' })).ok;
   } catch {
@@ -80,7 +109,8 @@ async function backendCandidates() {
   };
 }
 
-function flaggedLabels(id2label) {
+function flaggedLabels(id2label, outputs) {
+  if (outputs === 1) return [CONFIG.singleOutputLabel];
   const labels = Object.values(id2label ?? {});
   const hits = labels.filter((l) => CONFIG.flagLabelPattern.test(l));
   // Unnamed binary heads (LABEL_0 / LABEL_1): class 1 is the positive class.
@@ -102,7 +132,10 @@ async function loadEngine() {
       clf = await pipeline('text-classification', CONFIG.modelId, { device, dtype });
       // First run compiles WebGPU shaders / surfaces unsupported kernels, so a
       // backend only counts as working once it has produced an output.
-      await scoreBatch(clf, ['warm up']);
+      const [warm] = await scoreBatch(clf, ['warm up']);
+      // A backend that runs but returns NaN (e.g. fp16 overflow in a GPU
+      // kernel) must count as failed, not score every comment as garbage.
+      if (!warm.every((s) => Number.isFinite(s.score))) throw new Error('non-finite output');
       Object.assign(status, {
         state: 'ready',
         modelClass: clf.model.constructor.name, // e.g. RobertaForSequenceClassification
@@ -111,7 +144,7 @@ async function loadEngine() {
         loadMs: Math.round(performance.now() - t0),
       });
       console.info(`[rcf] ${CONFIG.modelId} (${status.modelClass}) ready on ${device}/${dtype} in ${status.loadMs} ms`);
-      return { clf, device, dtype, flagged: flaggedLabels(clf.model.config.id2label) };
+      return { clf, device, dtype, flagged: flaggedLabels(clf.model.config.id2label, warm.length) };
     } catch (err) {
       status.attempts.push(`${device}/${dtype}: ${err?.message || err}`);
       console.warn(`[rcf] ${device}/${dtype} failed`, err);
@@ -135,13 +168,18 @@ function getEngine() {
 // model but our own encoding (see encode.js) instead of calling the pipeline.
 async function scoreBatch(clf, texts) {
   const { config } = clf.model;
-  let { logits } = await clf.model(encodeBatch(clf.tokenizer, texts));
+  let { logits } = await clf.model(encodeBatch(clf.tokenizer, texts, CONFIG.maxTokens));
   logits = logits.to('float32');
   const [rows, classes] = logits.dims;
   const out = [];
   for (let i = 0; i < rows; i++) {
     const z = Array.from(logits.data.subarray(i * classes, (i + 1) * classes));
     let p;
+    if (classes === 1) {
+      // One output (e.g. Vanguard): a logit for the flagged class.
+      out.push([{ label: CONFIG.singleOutputLabel, score: 1 / (1 + Math.exp(-z[0])) }]);
+      continue;
+    }
     if (config.problem_type === 'multi_label_classification') {
       p = z.map((v) => 1 / (1 + Math.exp(-v)));
     } else {

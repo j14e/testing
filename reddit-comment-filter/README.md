@@ -1,7 +1,12 @@
 # Reddit Comment Filter
 
-Chrome (MV3) extension that runs a RoBERTa text classifier locally in the
-browser and marks long Reddit posts and comments as AI-written or not.
+Chrome (MV3) extension that runs an AI-text classifier locally in the browser
+and marks long Reddit posts and comments as AI-written or not.
+
+**Try the prototype:** download this repository (Code → Download ZIP), unzip
+it, open `chrome://extensions`, turn on Developer mode, click **Load
+unpacked** and pick the `prototype/extension` folder. See
+[`prototype/README.md`](prototype/README.md).
 
 What it adds to each scored post or comment:
 
@@ -18,19 +23,23 @@ What it adds to each scored post or comment:
   collapse, which keeps the username row and hides the comment and its
   replies; posts hide their text. Clicking the pill collapses or expands it.
 
-- **Model:** any RoBERTa-family (`roberta`, `xlm-roberta`) sequence classifier
-  from the Hugging Face Hub, loaded as `RobertaForSequenceClassification` by
-  [transformers.js](https://github.com/huggingface/transformers.js) v4. Default:
-  [`fakespot-ai/roberta-base-ai-text-detection-v1`](https://huggingface.co/fakespot-ai/roberta-base-ai-text-detection-v1),
-  a 2025 AI-generated-text detector, rather than the 2019 GPT-2-era
-  `roberta-base-openai-detector`.
-- **Runtime:** WebGPU, with a fallback to multi-threaded WASM. Both run the
-  fp16 model, which scores within 0.003 of the original PyTorch model. The
-  model files and ONNX Runtime ship inside the extension, so nothing leaves the
-  machine. Int8 is available but not the default: it is about twice as fast on
-  WASM, but it shifted real comments' scores by up to 0.58 with this detector.
-- **Accuracy (default model):** 96% (72/75) on human vs ChatGPT answers from
-  the HC3 `reddit_eli5` set. The misses were human answers scored as AI.
+- **Model:** [`ShantanuT01/vanguard-ai-text-detector`](https://huggingface.co/ShantanuT01/vanguard-ai-text-detector)
+  (Vanguard, 2026, MIT license). It is ModernBERT-large (396M parameters)
+  with one output, P(AI), and was part of the 2nd-place system at PAN-CLEF
+  2026. It runs through [transformers.js](https://github.com/huggingface/transformers.js)
+  v4. Any text-classification model transformers.js supports can be swapped
+  in (RoBERTa, ModernBERT, DeBERTa-v2, ...): see Setup.
+- **Why Vanguard:** out of 10 local detectors tested (September 2026) on the
+  same texts, it had the best balance. It caught 5 of 7 sample spam posts
+  and 9 of 10 fresh AI-written Reddit posts. At the 30% collapse line it
+  flagged 4.7% of pre-ChatGPT human Reddit posts. The previous default,
+  `fakespot-ai/roberta-base-ai-text-detection-v1`, caught 1 of 7 and flagged
+  13.3%. On HC3 `reddit_eli5` it gets 75 of 75 human vs ChatGPT answers right.
+- **Runtime:** WebGPU fp16 on GPUs with `shader-f16`, otherwise multi-threaded
+  WASM running the same fp16 model. It scores within 0.001 of the original
+  PyTorch model. The model (about 790 MB) and ONNX Runtime ship inside the
+  extension, so nothing leaves the machine. On a 4-core CPU without WebGPU,
+  expect several seconds per long comment.
 - **What gets scored:** posts (title + body) and comments with **more than 50
   words**, only when they are within 600 px of the visible area. Quotes, code
   and tables are left out, as the model card's `clean_text` does. Closest items
@@ -48,6 +57,10 @@ npm run build                        # -> dist/
 ```
 
 Then load `dist/` from `chrome://extensions` (Developer mode → Load unpacked).
+The build splits model files over 95 MB into `.partNN` pieces plus a
+`.parts.json` manifest (GitHub rejects files over 100 MB), and the extension
+joins them when loading. To refresh the prototype, copy `dist/` to
+`prototype/extension/`.
 
 `prepare_model.py` downloads the ONNX files if the repo publishes them.
 Otherwise it exports the PyTorch weights with optimum and converts them to
@@ -97,8 +110,9 @@ Reddit-shaped pages on `www.reddit.com` and `old.reddit.com`: shreddit custom
 elements with real shadow DOM and slots, and old-Reddit `.thing` markup. It
 runs every check twice, once with WebGPU forced and once with WASM forced:
 
-- The model loads as `RobertaForSequenceClassification` on the requested
-  backend, cross-origin isolated, with WASM threads.
+- The model loads on the requested backend from split `.partNN` files
+  (the test build splits even its tiny model), cross-origin isolated, with
+  WASM threads.
 - The extension's token IDs match Python's exactly, including a 1,380-word text
   cut to 512 tokens. transformers.js 4.3 drops RoBERTa's closing `</s>` when
   it truncates (a 480-word post scored 0.512 instead of 0.476), so the
@@ -118,8 +132,6 @@ runs every check twice, once with WebGPU forced and once with WASM forced:
   expands and re-collapses it without opening the post.
 - The vote buttons toggle one choice, and clicking a chosen button again
   clears it. They don't collapse the comment or open the post.
-- Clicking the badge hides and restores the text, and doesn't trigger the post
-  card's own click (which opens the post).
 - No console errors or CSP violations.
 
 The test model has the same architecture, tokenizer type and export path as
@@ -129,11 +141,11 @@ are predictable. It is a fixture, not a detector.
 ### Real model on real Reddit markup
 
 ```sh
-python scripts/prepare_model.py --dtypes fp16,fp32   # fp32 only for software WebGPU
+python scripts/prepare_model.py                      # Vanguard, fp16
 python test/make_real_expected.py                     # labelled HC3 reference scores
 npm run build
 node test/real-reddit.mjs wasm                       # full run
-node test/real-reddit.mjs webgpu --parity-only       # scores only (slow without a GPU)
+node test/real-reddit.mjs webgpu --parity-only       # scores only; needs a GPU with shader-f16
 ```
 
 `test/real-reddit.mjs` runs the production build with the real model. It uses

@@ -1,8 +1,8 @@
-node_modules/
-dist/
-dist-test/
+/node_modules/
+/dist/
+/dist-test/
 # Model weights (hundreds of MB): produced by scripts/prepare_model.py
-models/
+/models/
 test/.models/
 test/.artifacts/
 __pycache__/

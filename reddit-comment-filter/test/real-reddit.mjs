@@ -30,6 +30,7 @@ const EXT = path.join(root, 'dist');
 const CACHE = path.join(root, 'test', '.cache');
 const ARTIFACTS = path.join(root, 'test', '.artifacts');
 const MIN_WORDS = 50;
+const MAX_TOKENS = 512; // CONFIG.maxTokens
 const COLLAPSE_ABOVE = 0.3;
 const args = process.argv.slice(2);
 const parityOnly = args.includes('--parity-only');
@@ -194,6 +195,10 @@ function assertItems(items, label) {
       assert.equal(i.badge, null, `${who} should not be scored`);
       continue;
     }
+    // Reddit serves some comments already collapsed; their text is hidden, so
+    // it is only scored once the reader expands it. (The extension collapses
+    // only items it has scored, so collapsed + unscored means Reddit did it.)
+    if (i.collapsed && !i.badge) continue;
     assert.ok(i.badge?.score != null, `${who} has no score`);
     assert.ok(i.badge.visible, `${who}: pill not rendered`);
     assert.ok(i.badge.afterAuthor, `${who}: pill is not right after the username link`);
@@ -263,7 +268,8 @@ async function run(device, html, expected) {
     await check(`real model loads on ${device}`, () => {
       assert.equal(status.state, 'ready', status.error);
       assert.equal(status.device, device);
-      assert.equal(status.modelClass, 'RobertaForSequenceClassification');
+      assert.equal(status.modelId, expected.model, 'dist/ was built with a different model than the references');
+      assert.match(status.modelClass, /ForSequenceClassification$/);
     });
 
     // --parity-only: one human + one ChatGPT answer.
@@ -344,9 +350,9 @@ const expected = JSON.parse(fs.readFileSync(path.join(CACHE, 'real_expected.json
 console.log('\n=== tokenization (real tokenizer) ===');
 hfEnv.localModelPath = path.join(root, 'models/');
 hfEnv.allowRemoteModels = false;
-const realTok = await AutoTokenizer.from_pretrained('fakespot-ai/roberta-base-ai-text-detection-v1');
-await check('token ids match the Python tokenizer, special tokens kept when truncating', () => {
-  const { input_ids, attention_mask } = encodeBatch(realTok, expected.texts);
+const realTok = await AutoTokenizer.from_pretrained(expected.model);
+await check(`token ids match the Python tokenizer for ${expected.model}, special tokens kept when truncating`, () => {
+  const { input_ids, attention_mask } = encodeBatch(realTok, expected.texts, MAX_TOKENS);
   const width = input_ids.dims[1];
   expected.ids.forEach((py, i) => {
     const row = Array.from(input_ids.data.slice(i * width, (i + 1) * width), Number);

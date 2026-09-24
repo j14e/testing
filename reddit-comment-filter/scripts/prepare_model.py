@@ -26,7 +26,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-DEFAULT_MODEL = "fakespot-ai/roberta-base-ai-text-detection-v1"
+DEFAULT_MODEL = "ShantanuT01/vanguard-ai-text-detector"
 DTYPE_FILES = {
     "fp32": "model.onnx",
     "fp16": "model_fp16.onnx",
