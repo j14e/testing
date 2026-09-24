@@ -117,6 +117,11 @@ function itemState(page, id) {
         otherText: [...group.childNodes].filter((n) => n.nodeType === 3 || !n.matches('button, .rcf-votes')).map((n) => n.textContent).join('').trim(),
         tooltips: [group, ...group.querySelectorAll('*')].filter((n) => n.title).map((n) => n.title),
         votes: [...group.querySelectorAll('.rcf-vote')].filter(shown).map((b) => b.textContent),
+        // Solid fill + white text, no outline, for the pill and both vote buttons.
+        look: [badge, ...group.querySelectorAll('.rcf-vote')].map((b) => {
+          const cs = getComputedStyle(b);
+          return { color: cs.color, bg: cs.backgroundColor, border: cs.borderTopWidth, shadow: cs.boxShadow, outline: cs.outlineStyle };
+        }),
         note: note && { text: note.textContent, visible: shown(note), beforeText: note.nextElementSibling?.matches('.md, [slot="comment"], [slot="text-body"]') ?? false },
       },
     };
@@ -147,6 +152,13 @@ function assertScored(state, label, name) {
   // Only the verdict and the two vote buttons; no other text, no tooltips.
   assert.deepEqual(state.badge.groupText, [text, 'AI', 'Not AI'], `${name}: group shows ${JSON.stringify(state.badge.groupText)}`);
   assert.equal(state.badge.otherText, '', `${name}: extra text in the group`);
+  const [pill, ...votes] = state.badge.look;
+  assert.equal(pill.bg, { low: 'rgb(31, 136, 61)', medium: 'rgb(191, 135, 0)', high: 'rgb(207, 34, 46)' }[level], `${name}: pill colour`);
+  for (const v of votes) assert.match(v.bg, /^rgb\((87, 96, 106|31, 35, 40)\)$/, `${name}: vote buttons are dark grey (${v.bg})`);
+  for (const l of state.badge.look) {
+    assert.equal(l.color, 'rgb(255, 255, 255)', `${name}: text is white`);
+    assert.deepEqual([l.border, l.shadow, l.outline], ['0px', 'none', 'none'], `${name}: no outline (${JSON.stringify(l)})`);
+  }
   assert.deepEqual(state.badge.tooltips, [], `${name}: tooltips in the group`);
   assert.equal(state.badge.note?.text, 'Sorry, this classifier is very early, it can and will be wrong.', `${name}: disclaimer`);
   assert.ok(state.badge.note.beforeText, `${name}: disclaimer not right above the text`);

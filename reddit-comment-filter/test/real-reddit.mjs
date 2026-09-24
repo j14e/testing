@@ -35,6 +35,7 @@ const MAX_TOKENS = 512; // CONFIG.maxTokens
 const FLAG_ABOVE = 0.3;
 const AI_AT = 0.7;
 const PILL = { low: 'Human', medium: 'Maybe AI', high: 'AI' };
+const PILL_BG = { low: 'rgb(31, 136, 61)', medium: 'rgb(191, 135, 0)', high: 'rgb(207, 34, 46)' };
 const args = process.argv.slice(2);
 const parityOnly = args.includes('--parity-only');
 const named = args.filter((a) => !a.startsWith('--'));
@@ -167,6 +168,10 @@ function readItems(page) {
           visible: shown(badge),
           buttons: [...group.querySelectorAll('button')].filter(shown).map((b) => b.textContent),
           tooltips: [group, ...group.querySelectorAll('*')].filter((x) => x.title).length,
+          look: [badge, ...group.querySelectorAll('.rcf-vote')].map((b) => {
+            const cs = getComputedStyle(b);
+            return { color: cs.color, bg: cs.backgroundColor, border: cs.borderTopWidth, shadow: cs.boxShadow, outline: cs.outlineStyle };
+          }),
           afterAuthor: !!prevLink && prevLink.getAttribute('href').replace(/\/+$/, '').toLowerCase().endsWith(`/user/${(el.getAttribute('author') || '').toLowerCase()}`),
         },
       };
@@ -210,6 +215,14 @@ function assertItems(items, label) {
     const band = i.badge.score >= AI_AT ? 'high' : i.badge.score > FLAG_ABOVE ? 'medium' : 'low';
     assert.equal(i.badge.level, band, `${who}: colour band ${i.badge.level} at ${i.badge.score}`);
     assert.equal(i.badge.text, PILL[band], `${who}: pill reads ${i.badge.text} at ${i.badge.score}`);
+    // Reddit's own CSS must not override the look: solid fill, white text, no outline.
+    const [pill, ...votes] = i.badge.look;
+    assert.equal(pill.bg, PILL_BG[band], `${who}: pill colour ${pill.bg}`);
+    for (const v of votes) assert.match(v.bg, /^rgb\((87, 96, 106|31, 35, 40)\)$/, `${who}: vote button colour ${v.bg}`);
+    for (const l of i.badge.look) {
+      assert.equal(l.color, 'rgb(255, 255, 255)', `${who}: text colour ${l.color}`);
+      assert.deepEqual([l.border, l.shadow, l.outline], ['0px', 'none', 'none'], `${who}: outline ${JSON.stringify(l)}`);
+    }
     const shouldCollapse = i.badge.score > FLAG_ABOVE;
     assert.equal(i.collapsed, shouldCollapse, `${who}: collapsed=${i.collapsed} at ${i.badge.score}`);
     assert.equal(i.bodyVisible, !shouldCollapse, `${who}: text visible=${i.bodyVisible} at ${i.badge.score}`);

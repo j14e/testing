@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Reddit Comment Filter",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Scores long Reddit posts and comments with a local RoBERTa classifier (WebGPU/WASM) and lets you hide them.",
   "minimum_chrome_version": "116",
   "permissions": ["offscreen", "storage"],
