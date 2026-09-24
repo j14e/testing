@@ -3,9 +3,11 @@
 Chrome (MV3) extension that runs an AI-text classifier locally in the browser
 and marks long Reddit posts and comments as AI-written or not.
 
-**Try the prototype:** download this repository (Code → Download ZIP), unzip
-it, open `chrome://extensions`, turn on Developer mode, click **Load
-unpacked** and pick the `prototype/extension` folder. See
+**Try the prototype:** the ready-to-load build is committed to the
+**LocalDnB** repository, not this one. Download LocalDnB (Code → Download
+ZIP), unzip it, open `chrome://extensions`, turn on Developer mode, click
+**Load unpacked** and pick its `prototype/extension` folder (the one with
+`manifest.json` directly in it). See
 [`prototype/README.md`](prototype/README.md).
 
 What it adds to each scored post or comment:

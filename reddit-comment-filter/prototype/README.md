@@ -5,11 +5,16 @@ bundled. Everything runs on your computer; nothing is sent anywhere.
 
 ## Install (Chrome, Edge, Brave or another Chromium browser, version 116+)
 
-1. Download this repository: **Code → Download ZIP** on GitHub (or
-   `git clone`), and unzip it. The download is about 800 MB, mostly the model.
+1. Download the **LocalDnB** repository (the built extension is committed
+   there, not here): **Code → Download ZIP** on GitHub (or `git clone`), and
+   unzip it. The download is about 800 MB, mostly the model.
 2. Open `chrome://extensions` (Edge: `edge://extensions`).
 3. Turn on **Developer mode** (top right).
-4. Click **Load unpacked** and choose the `prototype/extension` folder.
+4. Click **Load unpacked** and choose the `extension` folder inside
+   `prototype`: the one with `manifest.json` directly in it, e.g.
+   `localdnb-primary/prototype/extension`. Windows' **Extract All** adds one
+   more level (`localdnb-primary/localdnb-primary/prototype/extension`).
+   Picking any other folder gives "Manifest file is missing or unreadable".
 5. Open reddit.com. The first time, the model takes roughly 10–30 seconds to
    load.
 
