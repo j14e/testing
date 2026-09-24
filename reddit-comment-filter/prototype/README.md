@@ -1,4 +1,4 @@
-# Reddit Comment Filter: prototype 0.1
+# Reddit Comment Filter: prototype 0.2
 
 A ready-to-load build of the extension with the Vanguard AI-text detector
 bundled. Everything runs on your computer; nothing is sent anywhere.
@@ -18,15 +18,44 @@ bundled. Everything runs on your computer; nothing is sent anywhere.
 On posts and comments longer than 50 words, near the part of the page you're
 looking at:
 
-- Next to the username, a pill reading **AI** or **Not AI**. Green means a
-  low AI likelihood (under 50%), yellow medium (50–80%), red high (80% and up).
-- Beside it, **AI** and **Not AI** buttons for your own call. These are
-  placeholders: they only highlight your choice.
+- Next to the username, a pill:
+  - **Human** (green): AI score up to 30%.
+  - **Maybe AI** (yellow): above 30%.
+  - **AI** (red): 70% and up.
+- Beside it, **AI** and **Not AI** buttons for your own call. Your votes are
+  saved on your computer (see below).
 - Above the text: "Sorry, this classifier is very early, it can and will be
   wrong."
-- Anything scoring above 30% starts collapsed. Comments collapse the way
-  Reddit's own collapse does (the username row stays, the comment and its
+- Anything flagged (Maybe AI or AI) starts collapsed. Comments collapse the
+  way Reddit's own collapse does (the username row stays, the comment and its
   replies hide). Click the pill to expand or collapse again.
+
+## Your votes
+
+Each AI / Not AI click is saved in the extension's local storage, together
+with the post or comment's text, link, subreddit, author, the model's score
+and the pill it showed. Nothing is sent anywhere. Click a pressed button
+again to delete that vote. Votes stay after reloading the page, restarting
+the browser or updating the extension. Removing the extension deletes them.
+
+To see them: on `chrome://extensions`, click **service worker** under the
+extension, then run this in the console that opens:
+
+```js
+chrome.storage.local.get(null).then((all) => console.table(Object.values(all).filter((r) => r?.vote)));
+```
+
+To copy them all as JSON (to paste into a file):
+
+```js
+chrome.storage.local.get(null).then((all) => copy(JSON.stringify(Object.values(all).filter((r) => r?.vote), null, 1)));
+```
+
+## Updating from 0.1
+
+Download the repository again and replace the old `prototype/extension`
+folder with the new one, in the same place. Then click the reload arrow on
+the extension's card in `chrome://extensions`.
 
 ## Good to know
 

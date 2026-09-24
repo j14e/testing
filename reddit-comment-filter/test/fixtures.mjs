@@ -67,7 +67,7 @@ export function shredditComment({ id, author, text, html, children = '', slot = 
       ? '' // deleted: no body
       : `<div slot="comment"><div id="${id}-comment-rtjson-content" class="md"><p>${html ?? esc(text)}</p></div></div>`;
   return `
-<shreddit-comment thingid="${id}" author="${author}" depth="0" ${slot ? `slot="${slot}"` : ''}>
+<shreddit-comment thingid="${id}" author="${author}" permalink="/r/remotework/comments/post1/comment/${id.slice(3)}/" depth="0" ${slot ? `slot="${slot}"` : ''}>
   <div slot="commentMeta">
     <faceplate-tracker noun="comment_author"><faceplate-hovercard><a href="/user/${author}/">${author}</a></faceplate-hovercard></faceplate-tracker>
     <span>·</span><faceplate-timeago>3h ago</faceplate-timeago>

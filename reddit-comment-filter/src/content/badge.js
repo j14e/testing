@@ -1,14 +1,15 @@
 // What the extension adds to a scored post/comment:
-//  - next to the username, a verdict pill ("AI" / "Not AI") coloured by how
-//    likely the model thinks AI is: green low, yellow medium, red high. No
+//  - next to the username, a pill with the model's verdict: "Human" (green),
+//    "Maybe AI" (yellow) or "AI" (red), by the bands in CONFIG. No
 //    percentages are shown. Clicking it collapses/expands the thread.
-//  - beside it, two buttons for the reader's own call (placeholders: they
-//    only highlight the choice; nothing is stored or sent yet).
+//  - beside it, AI / Not AI buttons for the reader's own call, saved on this
+//    device (votes.js).
 //  - a small disclaimer line above the text.
-// Threads scoring above CONFIG.collapseAbove start collapsed.
+// Flagged threads ("Maybe AI" and "AI") start collapsed.
 
 import { CONFIG } from '../config.js';
 import { authorLink, isCollapsed, setCollapsed } from './sites.js';
+import { loadVote, saveVote } from './votes.js';
 
 const DISCLAIMER = 'Sorry, this classifier is very early, it can and will be wrong.';
 
@@ -72,7 +73,7 @@ function createGroup(item) {
     button.setAttribute('aria-pressed', 'false');
     button.addEventListener('click', (e) => {
       swallow(e);
-      setVote(item, item.vote === value ? null : value);
+      vote(item, item.vote === value ? null : value);
     });
     votes.append(button);
   }
@@ -81,12 +82,44 @@ function createGroup(item) {
   Object.assign(item, { group, badge, votes });
 }
 
-// Placeholder: remembers the reader's choice on this page only.
-function setVote(item, value) {
+function showVote(item, value) {
   item.vote = value;
   for (const button of item.votes.querySelectorAll('.rcf-vote')) {
     button.setAttribute('aria-pressed', String(button.dataset.rcfVote === value));
   }
+}
+
+async function vote(item, value) {
+  const previous = item.vote ?? null;
+  item.voteChanged = true;
+  showVote(item, value);
+  try {
+    await saveVote(item, value);
+  } catch (err) {
+    // e.g. the extension was reloaded under an open tab: don't show a vote
+    // that wasn't kept.
+    console.warn('[rcf] could not save the vote:', err);
+    if (item.vote === value) showVote(item, previous);
+  }
+}
+
+// Once per item: press the button the reader chose before, unless they've
+// already clicked one here.
+async function restoreVote(item) {
+  if (item.voteLoaded) return;
+  item.voteLoaded = true;
+  try {
+    const saved = await loadVote(item);
+    if (saved && !item.voteChanged) showVote(item, saved);
+  } catch (err) {
+    console.warn('[rcf] could not read saved votes:', err);
+  }
+}
+
+function levelFor(score) {
+  if (score >= CONFIG.aiAt) return 'high';
+  if (score > CONFIG.flagAbove) return 'medium';
+  return 'low';
 }
 
 function collapse(item, collapsed) {
@@ -121,15 +154,18 @@ export function showError(item, message) {
   item.votes.hidden = true;
 }
 
-export function showResult(item, result) {
+export function showResult(item, result, meta) {
   const badge = ensureBadge(item);
-  const { label, score } = result;
+  const { score } = result;
+  item.meta = meta;
+  item.level = levelFor(score);
   badge.disabled = false;
-  badge.dataset.rcfLevel = score >= CONFIG.highScore ? 'high' : score >= CONFIG.midScore ? 'medium' : 'low';
+  badge.dataset.rcfLevel = item.level;
   badge.dataset.rcfScore = score.toFixed(4); // for tests/debugging; never displayed
-  badge.textContent = score >= CONFIG.midScore ? label : `Not ${label}`;
+  badge.textContent = CONFIG.pillText[item.level];
   badge.setAttribute('aria-pressed', String(isCollapsed(item.el, item)));
   item.votes.hidden = false;
+  restoreVote(item);
 
   if (!item.note) {
     item.note = document.createElement('div');
@@ -139,7 +175,7 @@ export function showResult(item, result) {
   if (!item.note.isConnected) insertNextTo(item.textEl, item.note, 'before');
 
   // Once per item, so a thread the reader expanded stays expanded.
-  if (!item.autoCollapsed && CONFIG.collapseAbove != null && score > CONFIG.collapseAbove) {
+  if (!item.autoCollapsed && CONFIG.collapseFlagged && score > CONFIG.flagAbove) {
     item.autoCollapsed = true;
     collapse(item, true);
   }

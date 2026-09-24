@@ -50,7 +50,9 @@ async function launch(device) {
       '--use-webgpu-adapter=swiftshader',
     ],
   });
-  const sw = ctx.serviceWorkers()[0] ?? (await ctx.waitForEvent('serviceworker'));
+  // Chromium may start other (built-in) service workers first.
+  const isExt = (w) => w.url().endsWith('/background.js');
+  const sw = ctx.serviceWorkers().find(isExt) ?? (await ctx.waitForEvent('serviceworker', { predicate: isExt }));
   await sw.evaluate((d) => chrome.storage.local.set({ device: d }), device);
 
   const pages = { '/': wwwFeedPage() };
@@ -128,16 +130,20 @@ async function waitIdle(page) {
   await page.waitForFunction(() => !document.querySelector('.rcf-badge[data-rcf-level="pending"]'), null, { timeout: 60_000 });
 }
 
+const PILL = { low: 'Human', medium: 'Maybe AI', high: 'AI' };
+const bandFor = (score) => (score >= 0.7 ? 'high' : score > 0.3 ? 'medium' : 'low');
+
 function assertScored(state, label, name) {
   assert.ok(state?.badge, `${name}: no badge`);
   assert.ok(state.badge.score != null, `${name}: badge not scored (${state.badge.text} / ${state.badge.level})`);
   assert.ok(state.badge.visible, `${name}: badge is not rendered (slotting?)`);
   if (label === 'ai') assert.ok(state.badge.score > 0.5, `${name}: expected AI-like, got ${state.badge.score}`);
   if (label === 'human') assert.ok(state.badge.score < 0.5, `${name}: expected human-like, got ${state.badge.score}`);
-  // Verdict + colour band, never a number.
+  // Verdict + colour band, never a number: Human up to 30%, Maybe AI above,
+  // AI from 70%.
   const { score, text, level } = state.badge;
-  assert.equal(text, score >= 0.5 ? 'AI' : 'Not AI', `${name}: verdict for ${score}`);
-  assert.equal(level, score >= 0.8 ? 'high' : score >= 0.5 ? 'medium' : 'low', `${name}: colour band for ${score}`);
+  assert.equal(level, bandFor(score), `${name}: colour band for ${score}`);
+  assert.equal(text, PILL[level], `${name}: verdict for ${score}`);
   // Only the verdict and the two vote buttons; no other text, no tooltips.
   assert.deepEqual(state.badge.groupText, [text, 'AI', 'Not AI'], `${name}: group shows ${JSON.stringify(state.badge.groupText)}`);
   assert.equal(state.badge.otherText, '', `${name}: extra text in the group`);
@@ -263,22 +269,69 @@ async function runDevice(device) {
       assert.equal(await page.evaluate(() => window.__postNavigations || 0), before, 'pill click reached the post card');
     });
 
-    await check('vote buttons are placeholders: they toggle one choice and do nothing else', async () => {
-      const scope = `shreddit-comment[thingid="${EXPECT.c1.id}"] > [slot="commentMeta"]`;
+    await check('votes are saved on this device, restored after a reload, and deleted when un-pressed', async () => {
+      const { id, author } = EXPECT.c1;
+      const scope = `shreddit-comment[thingid="${id}"] > [slot="commentMeta"]`;
       const ai = page.locator(`${scope} .rcf-vote[data-rcf-vote="ai"]`);
       const human = page.locator(`${scope} .rcf-vote[data-rcf-vote="human"]`);
-      const body = page.locator(`shreddit-comment[thingid="${EXPECT.c1.id}"] > [slot="comment"]:not(.rcf-note, .rcf-group)`);
+      const body = page.locator(`shreddit-comment[thingid="${id}"] > [slot="comment"]:not(.rcf-note, .rcf-group)`);
       const pressed = async () => [await ai.getAttribute('aria-pressed'), await human.getAttribute('aria-pressed')];
+      const saved = () => sw.evaluate((key) => chrome.storage.local.get(key).then((r) => r[key] ?? null), `vote:${id}`);
+      const waitSaved = (vote) =>
+        sw.evaluate(async ([key, vote]) => {
+          for (let i = 0; i < 50; i++) {
+            const r = (await chrome.storage.local.get(key))[key];
+            if ((r?.vote ?? null) === vote) return;
+            await new Promise((ok) => setTimeout(ok, 100));
+          }
+          throw new Error(`storage never had vote=${vote} for ${key}`);
+        }, [`vote:${id}`, vote]);
+
+      const state = await itemState(page, id);
       await ai.click();
       assert.deepEqual(await pressed(), ['true', 'false']);
+      await waitSaved('ai');
+      const rec = await saved();
+      assert.equal(rec.id, id);
+      assert.equal(rec.kind, 'comment');
+      assert.equal(rec.author, author);
+      assert.equal(rec.subreddit, 'remotework');
+      assert.equal(rec.url, `https://www.reddit.com/r/remotework/comments/post1/comment/${id.slice(3)}/`);
+      assert.equal(rec.page, 'https://www.reddit.com/r/remotework/comments/post1/fixture/');
+      assert.equal(rec.text, (await body.innerText()).replace(/\s+/g, ' ').trim(), 'record keeps the text the model read');
+      assert.equal(rec.score.toFixed(4), state.badge.score.toFixed(4));
+      assert.equal(rec.verdict, state.badge.text);
+      assert.equal(rec.flagged, state.badge.score > 0.3);
+      assert.equal(rec.model, 'local-test/tiny-roberta');
+      assert.ok(!Number.isNaN(Date.parse(rec.votedAt)), 'votedAt');
+
       await human.click();
       assert.deepEqual(await pressed(), ['false', 'true']);
+      await waitSaved('human');
+      assert.equal(await body.isVisible(), true, 'voting must not collapse the comment');
+
+      await page.reload();
+      await page.waitForFunction((sel) => document.querySelector(sel)?.getAttribute('aria-pressed') === 'true', `${scope} .rcf-vote[data-rcf-vote="human"]`, { timeout: 60_000 });
+      assert.deepEqual(await pressed(), ['false', 'true'], 'vote not restored after reload');
+
       await human.click();
       assert.deepEqual(await pressed(), ['false', 'false'], 'clicking the chosen button again clears it');
-      assert.equal(await body.isVisible(), true, 'voting must not collapse the comment');
+      await waitSaved(null);
+      await page.reload();
+      await waitIdle(page);
+      assert.deepEqual(await pressed(), ['false', 'false'], 'deleted vote came back after reload');
+
       const before = await page.evaluate(() => window.__postNavigations || 0);
       await page.locator(`shreddit-post[id="${EXPECT.post.id}"] .rcf-vote[data-rcf-vote="ai"]`).click();
       assert.equal(await page.evaluate(() => window.__postNavigations || 0), before, 'vote click reached the post card');
+      await sw.evaluate(async (key) => {
+        for (let i = 0; i < 50 && !(await chrome.storage.local.get(key))[key]; i++) await new Promise((ok) => setTimeout(ok, 100));
+      }, `vote:${EXPECT.post.id}`);
+      const post = await sw.evaluate((key) => chrome.storage.local.get(key).then((r) => r[key]), `vote:${EXPECT.post.id}`);
+      assert.equal(post?.vote, 'ai');
+      assert.equal(post.kind, 'post');
+      assert.ok(post.text.startsWith('What are the long-term effects of remote work?'), 'post record keeps the title');
+      assert.equal(post.flagged, post.score > 0.3);
     });
 
     await check('home feed: badge on text posts without an author link, not on image posts', async () => {

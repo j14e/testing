@@ -22,17 +22,18 @@ export const CONFIG = {
   maxTokens: 512,
   maxChars: 4000,
 
-  // Labels that count as the "flagged" class. The pill next to the username
-  // reads "<label>" or "Not <label>" (e.g. "AI" / "Not AI").
+  // Labels that count as the model's "AI" class, and the name of that class
+  // for models with a single output (a sigmoid score, like Vanguard), whose
+  // config names no labels.
   flagLabelPattern: /\b(ai|fake|machine|generated|artificial|llm|gpt|chatgpt|bot|synthetic|toxic)\b|^label_1$/i,
-  // Name of the flagged class for models with a single output (a sigmoid
-  // score, like Vanguard), whose config names no labels.
   singleOutputLabel: 'AI',
-  // Pill colour bands for the flagged-class probability: green below midScore,
-  // yellow from midScore, red from highScore. midScore is also the AI/Not AI cut.
-  highScore: 0.8,
-  midScore: 0.5,
-  // Collapse the thread when the AI score is above this (0.3 = 30%); null
-  // turns it off. The pill toggles it either way.
-  collapseAbove: 0.3,
+
+  // The pill next to the username, by the AI probability: "Human" (green) up
+  // to flagAbove, "Maybe AI" (yellow) above it, "AI" (red) from aiAt.
+  flagAbove: 0.3,
+  aiAt: 0.7,
+  pillText: { low: 'Human', medium: 'Maybe AI', high: 'AI' },
+  // Collapse flagged threads (above flagAbove) when they're scored. The pill
+  // toggles it either way.
+  collapseFlagged: true,
 };

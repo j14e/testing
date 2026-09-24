@@ -31,7 +31,10 @@ const CACHE = path.join(root, 'test', '.cache');
 const ARTIFACTS = path.join(root, 'test', '.artifacts');
 const MIN_WORDS = 50;
 const MAX_TOKENS = 512; // CONFIG.maxTokens
-const COLLAPSE_ABOVE = 0.3;
+// CONFIG.flagAbove / aiAt: Human up to 30%, Maybe AI above (collapsed), AI from 70%.
+const FLAG_ABOVE = 0.3;
+const AI_AT = 0.7;
+const PILL = { low: 'Human', medium: 'Maybe AI', high: 'AI' };
 const args = process.argv.slice(2);
 const parityOnly = args.includes('--parity-only');
 const named = args.filter((a) => !a.startsWith('--'));
@@ -204,7 +207,10 @@ function assertItems(items, label) {
     assert.ok(i.badge.afterAuthor, `${who}: pill is not right after the username link`);
     assert.deepEqual(i.badge.buttons, [i.badge.text, 'AI', 'Not AI'], `${who}: shows ${JSON.stringify(i.badge.buttons)}`);
     assert.equal(i.badge.tooltips, 0, `${who}: has tooltips`);
-    const shouldCollapse = i.badge.score > COLLAPSE_ABOVE;
+    const band = i.badge.score >= AI_AT ? 'high' : i.badge.score > FLAG_ABOVE ? 'medium' : 'low';
+    assert.equal(i.badge.level, band, `${who}: colour band ${i.badge.level} at ${i.badge.score}`);
+    assert.equal(i.badge.text, PILL[band], `${who}: pill reads ${i.badge.text} at ${i.badge.score}`);
+    const shouldCollapse = i.badge.score > FLAG_ABOVE;
     assert.equal(i.collapsed, shouldCollapse, `${who}: collapsed=${i.collapsed} at ${i.badge.score}`);
     assert.equal(i.bodyVisible, !shouldCollapse, `${who}: text visible=${i.bodyVisible} at ${i.badge.score}`);
     if (shouldCollapse) assert.equal(i.repliesVisible, 0, `${who}: replies still visible under a collapsed thread`);
@@ -215,7 +221,7 @@ function printItems(items) {
   for (const i of items.filter((x) => x.long)) {
     const b = i.badge;
     console.log(
-      `        ${(b?.text ?? '-').padEnd(7)} ${(b?.level ?? '').padEnd(7)} ${b?.score?.toFixed(2) ?? '-  '}  ${i.collapsed ? 'collapsed' : 'open     '}` +
+      `        ${(b?.text ?? '-').padEnd(8)} ${(b?.level ?? '').padEnd(7)} ${b?.score?.toFixed(2) ?? '-  '}  ${i.collapsed ? 'collapsed' : 'open     '}` +
         `  ${String(i.words).padStart(4)}w  ${i.kind === 'post' ? 'post ' : ''}${i.author}${i.replies ? ` (+${i.replies} replies)` : ''}`,
     );
   }
@@ -291,7 +297,7 @@ async function run(device, html, expected) {
     if (parityOnly) return;
 
     for (const [n, p] of PAGES.entries()) {
-      await check(`${p.name} (captured ${p.captured}): every item over ${MIN_WORDS} words scored next to its username; above ${COLLAPSE_ABOVE * 100}% collapsed`, async () => {
+      await check(`${p.name} (captured ${p.captured}): every item over ${MIN_WORDS} words scored next to its username; above ${FLAG_ABOVE * 100}% collapsed`, async () => {
         if (n > 0) await page.goto(p.url, { waitUntil: 'domcontentloaded' });
         await page.waitForTimeout(3000); // Reddit's components render; the content script scans
         await waitIdle(page);
@@ -332,6 +338,39 @@ async function run(device, html, expected) {
       await pill.click();
       assert.equal(await collapsed(), before, 'second click did not toggle back');
       assert.equal(await body.isVisible(), !before, 'text visibility after second click');
+    });
+
+    await check('a vote on a real comment is saved with its link and restored after a reload', async () => {
+      const pill = page.locator('shreddit-comment .rcf-badge[data-rcf-score]').first();
+      const comment = pill.locator('xpath=ancestor::shreddit-comment[1]');
+      const id = await comment.getAttribute('thingid');
+      const human = page.locator(`shreddit-comment[thingid="${id}"] .rcf-vote[data-rcf-vote="human"]`).first();
+      await human.scrollIntoViewIfNeeded();
+      await human.click();
+      const key = `vote:${id}`;
+      const rec = await sw.evaluate(async (key) => {
+        for (let i = 0; i < 50; i++) {
+          const r = (await chrome.storage.local.get(key))[key];
+          if (r) return r;
+          await new Promise((ok) => setTimeout(ok, 100));
+        }
+        return null;
+      }, key);
+      assert.equal(rec?.vote, 'human', 'vote not saved');
+      assert.equal(rec.url, `https://www.reddit.com${await comment.getAttribute('permalink')}`);
+      assert.equal(rec.subreddit, PAGES[0].url.match(/\/r\/([^/]+)/)[1]);
+      assert.equal(rec.author, await comment.getAttribute('author'));
+      assert.ok(rec.text.split(' ').length > MIN_WORDS, 'record text');
+      assert.equal(rec.verdict, await pill.textContent());
+      assert.equal(rec.model, expected.model);
+      console.log(`      saved ${key}: ${rec.verdict} (${rec.score.toFixed(2)}), ${rec.url}`);
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(3000);
+      await scrollThrough(page);
+      const again = page.locator(`shreddit-comment[thingid="${id}"] .rcf-vote[data-rcf-vote="human"]`).first();
+      await again.waitFor({ state: 'attached', timeout: 180_000 });
+      assert.equal(await again.getAttribute('aria-pressed'), 'true', 'vote not restored after reload');
+      await sw.evaluate((key) => chrome.storage.local.remove(key), key);
     });
 
     await check('no extension errors logged', () => assert.deepEqual(errors.filter((e) => !e.includes('ready on')), []));

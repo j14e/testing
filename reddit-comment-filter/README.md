@@ -10,18 +10,21 @@ unpacked** and pick the `prototype/extension` folder. See
 
 What it adds to each scored post or comment:
 
-- **Next to the username:** a pill reading **AI** or **Not AI**. Its colour
-  gives a rough likelihood of AI: green is low (under 50%), yellow is medium
-  (50–80%), red is high (80% and up). No numbers are shown.
+- **Next to the username:** a pill with the model's verdict. No numbers are
+  shown.
+  - **Human** (green): AI score up to 30%.
+  - **Maybe AI** (yellow): above 30%.
+  - **AI** (red): 70% and up, the obvious cases only.
+
+  The bands are `flagAbove` and `aiAt` in `src/config.js`.
 - **Beside the pill:** two buttons, **AI** and **Not AI**, for the reader's
-  own call. They are placeholders for now: they highlight the choice on the
-  page and store or send nothing.
+  own call. Votes are saved on the device (see [Saved votes](#saved-votes)).
 - **Above the text:** "Sorry, this classifier is very early, it can and will
   be wrong."
-- **Collapsed threads:** anything scoring above 30% (`collapseAbove` in
-  `src/config.js`) starts collapsed. Comments use Reddit's own thread
-  collapse, which keeps the username row and hides the comment and its
-  replies; posts hide their text. Clicking the pill collapses or expands it.
+- **Collapsed threads:** anything flagged (Maybe AI or AI, above 30%) starts
+  collapsed. Comments use Reddit's own thread collapse, which keeps the
+  username row and hides the comment and its replies; posts hide their text.
+  Clicking the pill collapses or expands it.
 
 - **Model:** [`ShantanuT01/vanguard-ai-text-detector`](https://huggingface.co/ShantanuT01/vanguard-ai-text-detector)
   (Vanguard, 2026, MIT license). It is ModernBERT-large (396M parameters)
@@ -46,6 +49,44 @@ What it adds to each scored post or comment:
   go first, in batches of 8. Items further down wait until you scroll to them.
   Works on www/sh.reddit.com (`<shreddit-post>`, `<shreddit-comment>`) and
   old.reddit.com, including infinite scroll and "load more" replies.
+
+## Saved votes
+
+Clicking **AI** or **Not AI** saves a record in the extension's
+`chrome.storage.local`. It stays on this device and is never sent anywhere.
+Clicking the pressed button again deletes the record. After a reload, or
+wherever the same post or comment shows up again, the button stays pressed.
+
+Each record is stored under `vote:<Reddit id>` (for example `vote:t1_abc123`)
+and holds:
+
+| Field | Contents |
+|---|---|
+| `vote` | `ai` or `human` (the Not AI button) |
+| `id`, `kind`, `author` | The post or comment |
+| `subreddit`, `url`, `page` | Where it is |
+| `text` | The text the model read |
+| `score`, `verdict`, `flagged` | The model's score, the pill it showed, and whether it was above 30% |
+| `model` | Which model scored it |
+| `votedAt` | When you voted |
+
+Votes on every scored item are kept, Human ones included, and `flagged`
+tells them apart.
+
+To see them, open `chrome://extensions`, click **service worker** under the
+extension and run:
+
+```js
+chrome.storage.local.get(null).then((all) => console.table(Object.values(all).filter((r) => r?.vote)));
+```
+
+To copy them all as JSON:
+
+```js
+chrome.storage.local.get(null).then((all) => copy(JSON.stringify(Object.values(all).filter((r) => r?.vote), null, 1)));
+```
+
+Reloading or updating the extension keeps the votes. Removing it deletes them.
 
 ## Setup
 
@@ -87,6 +128,7 @@ content script (reddit.com)                     offscreen document
   sites.js   find posts/comments, own text         transformers.js pipeline
   index.js   IntersectionObserver + queue  ─────►  WebGPU fp16/fp32 → WASM fp16
   badge.js   verdict + votes by username   ◄─────  {label, score, scores}
+  votes.js   votes → chrome.storage.local
                      │ ensure-offscreen
                      ▼
              background service worker (creates the offscreen document)
@@ -126,12 +168,14 @@ runs every check twice, once with WebGPU forced and once with WASM forced:
   outside Reddit's hover-card wrapper and never inside the text. On feed cards
   with no author link, they go above the text.
 - The group shows only the verdict and the two vote buttons, with no other
-  text and no tooltips. The pill has the right colour band, and the
-  disclaimer sits right above the text.
+  text and no tooltips. The pill reads Human, Maybe AI or AI with the
+  matching colour for its score, and the disclaimer sits right above the text.
 - Anything above 30% starts collapsed with its replies hidden. The pill
   expands and re-collapses it without opening the post.
-- The vote buttons toggle one choice, and clicking a chosen button again
-  clears it. They don't collapse the comment or open the post.
+- A vote is saved in `chrome.storage.local` with the item's id, link,
+  subreddit, author, text, score, verdict and model. It is still pressed after
+  a reload, and clicking it again deletes the record. Voting doesn't collapse
+  the comment or open the post.
 - No console errors or CSP violations.
 
 The test model has the same architecture, tokenizer type and export path as
@@ -159,10 +203,13 @@ committed. The test checks:
   tokens, and browser scores match onnxruntime within 0.005 on labelled Reddit
   answers.
 - Every post and comment over 50 words is scored, with the pill right after
-  its username, and only once it is near the viewport.
+  its username, and only once it is near the viewport. The pill reads Human,
+  Maybe AI or AI for its score.
 - Exactly the items above 30% are collapsed, with their text and replies
   actually hidden.
 - The pill toggles Reddit's own collapse on a real comment. Reddit has shipped
   comments two ways: a `<details>` element in the page (September 2026) and a
   shadow-DOM toggle button (August 2026). The extension drives whichever one
   the page has.
+- A vote on a real comment is saved with its permalink and subreddit, and is
+  still pressed after a reload.
