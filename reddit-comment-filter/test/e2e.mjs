@@ -85,12 +85,22 @@ function itemState(page, id) {
     const badge = [...el.querySelectorAll('.rcf-badge')].find((b) => owner(b) === el) ?? null;
     const group = badge?.closest('.rcf-group');
     const note = [...el.querySelectorAll('.rcf-note')].find((n) => owner(n) === el) ?? null;
-    const shown = (n) => !!n && n.getBoundingClientRect().width > 0 && n.getBoundingClientRect().height > 0;
+    const shown = (n) => !!n && n.checkVisibility();
+    const OURS = '.rcf-group, .rcf-note';
+    const body =
+      el.querySelector(`:scope > [slot="comment"]:not(${OURS})`) ??
+      [...el.querySelectorAll(`[slot="text-body"]:not(${OURS}), .entry .usertext-body .md`)].find((n) => owner(n) === el);
+    const collapsed =
+      el.localName === 'shreddit-comment' ? el.hasAttribute('collapsed')
+        : el.matches('.comment') ? el.classList.contains('collapsed')
+          : !!body?.classList.contains('rcf-hidden');
     const rect = el.getBoundingClientRect();
     const prev = group?.previousElementSibling;
     const prevLink = prev?.matches('a') ? prev : prev?.querySelector('a');
     return {
       top: rect.top + scrollY,
+      collapsed,
+      bodyVisible: shown(body),
       badge: badge && {
         text: badge.textContent,
         score: badge.dataset.rcfScore ? Number(badge.dataset.rcfScore) : null,
@@ -100,8 +110,10 @@ function itemState(page, id) {
         prevTag: prev?.localName ?? null,
         prevLinkHref: prevLink?.getAttribute('href') ?? null,
         insideBody: !!group.closest('.md, [slot="comment"], [slot="text-body"]'),
-        // Everything a reader can see or hover in the group, to check no percentage leaks.
-        visibleText: group.textContent + ' ' + [...group.querySelectorAll('[title]')].map((n) => n.title).join(' '),
+        // Everything a reader can see or hover in the group.
+        groupText: [...group.querySelectorAll('button')].filter(shown).map((b) => b.textContent),
+        otherText: [...group.childNodes].filter((n) => n.nodeType === 3 || !n.matches('button, .rcf-votes')).map((n) => n.textContent).join('').trim(),
+        tooltips: [group, ...group.querySelectorAll('*')].filter((n) => n.title).map((n) => n.title),
         votes: [...group.querySelectorAll('.rcf-vote')].filter(shown).map((b) => b.textContent),
         note: note && { text: note.textContent, visible: shown(note), beforeText: note.nextElementSibling?.matches('.md, [slot="comment"], [slot="text-body"]') ?? false },
       },
@@ -126,10 +138,16 @@ function assertScored(state, label, name) {
   const { score, text, level } = state.badge;
   assert.equal(text, score >= 0.5 ? 'AI' : 'Not AI', `${name}: verdict for ${score}`);
   assert.equal(level, score >= 0.8 ? 'high' : score >= 0.5 ? 'medium' : 'low', `${name}: colour band for ${score}`);
-  assert.doesNotMatch(state.badge.visibleText, /\d\s*%|\d\.\d/, `${name}: a score is visible: ${state.badge.visibleText}`);
-  assert.deepEqual(state.badge.votes, ['AI', 'Not AI'], `${name}: vote buttons next to the verdict`);
+  // Only the verdict and the two vote buttons; no other text, no tooltips.
+  assert.deepEqual(state.badge.groupText, [text, 'AI', 'Not AI'], `${name}: group shows ${JSON.stringify(state.badge.groupText)}`);
+  assert.equal(state.badge.otherText, '', `${name}: extra text in the group`);
+  assert.deepEqual(state.badge.tooltips, [], `${name}: tooltips in the group`);
   assert.equal(state.badge.note?.text, 'Sorry, this classifier is very early, it can and will be wrong.', `${name}: disclaimer`);
-  assert.ok(state.badge.note.visible && state.badge.note.beforeText, `${name}: disclaimer not shown right above the text`);
+  assert.ok(state.badge.note.beforeText, `${name}: disclaimer not right above the text`);
+  // Above 30%: the thread starts collapsed (text hidden); otherwise open.
+  assert.equal(state.collapsed, score > 0.3, `${name}: collapsed=${state.collapsed} at ${score}`);
+  assert.equal(state.bodyVisible, score <= 0.3, `${name}: text visible=${state.bodyVisible} at ${score}`);
+  if (score <= 0.3) assert.ok(state.badge.note.visible, `${name}: disclaimer hidden on an open item`);
 }
 
 async function runDevice(device) {
@@ -218,26 +236,38 @@ async function runDevice(device) {
       assertScored(await itemState(page, 't1_dynamic'), 'ai', 'dynamic');
     });
 
-    await check('clicking the badge hides the text and does not open the post; clicking again restores it', async () => {
+    await check('a collapsed AI thread hides its replies; open threads keep theirs', async () => {
+      const c1r1r1 = page.locator(`shreddit-comment[thingid="${EXPECT.c1r1r1.id}"] > [slot="comment"]`);
+      assert.ok(states.c1r1.collapsed, 'AI reply not collapsed');
+      assert.equal(await c1r1r1.isVisible(), false, 'reply under a collapsed comment still visible');
+      assert.ok(!states.c1.collapsed && states.c1.bodyVisible, 'human parent collapsed');
+      assert.equal(await page.locator('.rcf-placeholder').count(), 0, 'placeholder text added');
+    });
+
+    await check('clicking the pill expands a collapsed thread and collapses it again, without opening the post', async () => {
       await page.evaluate(() => scrollTo(0, 0));
       const badge = page.locator(`shreddit-post[id="${EXPECT.post.id}"] .rcf-badge`);
-      const body = page.locator(`shreddit-post[id="${EXPECT.post.id}"] [slot="text-body"]:not(.rcf-placeholder, .rcf-note, .rcf-group)`);
+      const body = page.locator(`shreddit-post[id="${EXPECT.post.id}"] [slot="text-body"]:not(.rcf-note, .rcf-group)`);
       const before = await page.evaluate(() => window.__postNavigations || 0);
-      await badge.click();
-      assert.equal(await body.isVisible(), false, 'text still visible after blocking');
+      assert.equal(await body.isVisible(), false, 'AI post not collapsed on arrival');
       assert.equal(await badge.getAttribute('aria-pressed'), 'true');
-      assert.ok(await page.locator(`shreddit-post[id="${EXPECT.post.id}"] .rcf-placeholder`).isVisible(), 'no placeholder');
-      await page.screenshot({ path: path.join(ARTIFACTS, `www-blocked-${device}.png`) });
       await badge.click();
-      assert.equal(await body.isVisible(), true, 'text not restored');
-      assert.equal(await page.evaluate(() => window.__postNavigations || 0), before, 'badge click reached the post card');
+      assert.equal(await body.isVisible(), true, 'text not shown after clicking the pill');
+      assert.equal(await badge.getAttribute('aria-pressed'), 'false');
+      await badge.click();
+      assert.equal(await body.isVisible(), false, 'text not collapsed again');
+      const reply = page.locator(`shreddit-comment[thingid="${EXPECT.c1r1.id}"]`);
+      await reply.locator(':scope > [slot="commentMeta"] .rcf-badge').click();
+      assert.equal(await reply.getAttribute('collapsed'), null, 'comment thread not expanded by the pill');
+      assert.equal(await page.locator(`shreddit-comment[thingid="${EXPECT.c1r1r1.id}"] > [slot="comment"]`).isVisible(), true, 'replies not shown again');
+      assert.equal(await page.evaluate(() => window.__postNavigations || 0), before, 'pill click reached the post card');
     });
 
     await check('vote buttons are placeholders: they toggle one choice and do nothing else', async () => {
       const scope = `shreddit-comment[thingid="${EXPECT.c1.id}"] > [slot="commentMeta"]`;
       const ai = page.locator(`${scope} .rcf-vote[data-rcf-vote="ai"]`);
       const human = page.locator(`${scope} .rcf-vote[data-rcf-vote="human"]`);
-      const body = page.locator(`shreddit-comment[thingid="${EXPECT.c1.id}"] > [slot="comment"]:not(.rcf-placeholder, .rcf-note, .rcf-group)`);
+      const body = page.locator(`shreddit-comment[thingid="${EXPECT.c1.id}"] > [slot="comment"]:not(.rcf-note, .rcf-group)`);
       const pressed = async () => [await ai.getAttribute('aria-pressed'), await human.getAttribute('aria-pressed')];
       await ai.click();
       assert.deepEqual(await pressed(), ['true', 'false']);

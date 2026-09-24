@@ -7,13 +7,16 @@ What it adds to each scored post or comment:
 
 - **Next to the username:** a pill reading **AI** or **Not AI**. Its colour
   gives a rough likelihood of AI: green is low (under 50%), yellow is medium
-  (50–80%), red is high (80% and up). No numbers are shown. Clicking the pill
-  collapses the text; clicking again shows it.
-- **Beside the pill:** "Your call: AI | Not AI", two buttons for the reader's
-  own judgement. They are placeholders for now: they highlight the choice on
-  the page and store or send nothing.
+  (50–80%), red is high (80% and up). No numbers are shown.
+- **Beside the pill:** two buttons, **AI** and **Not AI**, for the reader's
+  own call. They are placeholders for now: they highlight the choice on the
+  page and store or send nothing.
 - **Above the text:** "Sorry, this classifier is very early, it can and will
   be wrong."
+- **Collapsed threads:** anything scoring above 30% (`collapseAbove` in
+  `src/config.js`) starts collapsed. Comments use Reddit's own thread
+  collapse, which keeps the username row and hides the comment and its
+  replies; posts hide their text. Clicking the pill collapses or expands it.
 
 - **Model:** any RoBERTa-family (`roberta`, `xlm-roberta`) sequence classifier
   from the Hugging Face Hub, loaded as `RobertaForSequenceClassification` by
@@ -108,8 +111,11 @@ runs every check twice, once with WebGPU forced and once with WASM forced:
 - The verdict pill and vote buttons render right after the author link,
   outside Reddit's hover-card wrapper and never inside the text. On feed cards
   with no author link, they go above the text.
-- The pill reads AI/Not AI with the right colour band, and no percentage is
-  visible or in any tooltip. The disclaimer sits right above the text.
+- The group shows only the verdict and the two vote buttons, with no other
+  text and no tooltips. The pill has the right colour band, and the
+  disclaimer sits right above the text.
+- Anything above 30% starts collapsed with its replies hidden. The pill
+  expands and re-collapses it without opening the post.
 - The vote buttons toggle one choice, and clicking a chosen button again
   clears it. They don't collapse the comment or open the post.
 - Clicking the badge hides and restores the text, and doesn't trigger the post
@@ -131,16 +137,20 @@ node test/real-reddit.mjs webgpu --parity-only       # scores only (slow without
 ```
 
 `test/real-reddit.mjs` runs the production build with the real model. It uses
-Wayback Machine captures of a live r/explainlikeimfive thread and the
-subreddit feed from August 2026, served at their real URLs. Reddit's own
-JS/CSS render the page, so the markup is exactly what Reddit ships. The
+the latest Wayback Machine captures of r/antiai and r/SaaS (September 2026):
+both subreddit feeds and three threads, served at their real URLs. Reddit's
+own JS/CSS render the pages, so the markup is exactly what Reddit ships. The
 captures are downloaded into `test/.cache/` on the first run and never
 committed. The test checks:
 
 - The real tokenizer's IDs match Python's exactly, including texts past 512
   tokens, and browser scores match onnxruntime within 0.005 on labelled Reddit
   answers.
-- Every comment over 50 words in the thread is scored, with the badge right
-  after its username, and only once it is near the viewport.
-- Feed posts over 50 words are scored next to the author.
-- Hiding and restoring a real comment works.
+- Every post and comment over 50 words is scored, with the pill right after
+  its username, and only once it is near the viewport.
+- Exactly the items above 30% are collapsed, with their text and replies
+  actually hidden.
+- The pill toggles Reddit's own collapse on a real comment. Reddit has shipped
+  comments two ways: a `<details>` element in the page (September 2026) and a
+  shadow-DOM toggle button (August 2026). The extension drives whichever one
+  the page has.

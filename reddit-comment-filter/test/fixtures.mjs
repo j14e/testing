@@ -51,9 +51,12 @@ const SHREDDIT_ELEMENTS = `
     constructor() {
       super();
       this.attachShadow({ mode: 'open' }).innerHTML =
-        '<style>:host{display:block;margin:6px 0 6px 14px;padding-left:8px;border-left:2px solid #ddd}</style>' +
+        '<style>:host{display:block;margin:6px 0 6px 14px;padding-left:8px;border-left:2px solid #ddd}' +
+        // Like Reddit's: a collapsed comment keeps only its username row.
+        ':host([collapsed]) .fold{display:none}</style>' +
         '<div style="display:flex;gap:4px;align-items:center"><slot name="commentMeta"></slot></div>' +
-        '<div><slot name="comment"></slot></div><slot name="actionRow"></slot><div><slot name="children"></slot></div>';
+        '<div class="fold"><slot name="comment"></slot></div><div class="fold"><slot name="actionRow"></slot></div>' +
+        '<div class="fold"><slot name="children"></slot></div>';
     }
   });
 </script>`;
@@ -155,7 +158,7 @@ export function wwwFeedPage() {
 // old.reddit.com comments page.
 export function oldCommentsPage() {
   const thing = (id, author, text, children = '') => `
-<div class="thing comment" id="thing_${id}" data-fullname="${id}" data-author="${author}">
+<div class="thing comment noncollapsed" id="thing_${id}" data-fullname="${id}" data-author="${author}">
   <div class="entry">
     <p class="tagline"><a class="expand">[–]</a><a href="https://old.reddit.com/user/${author}" class="author">${author}</a><span class="userattrs"></span> <span class="score">5 points</span> <time>2 hours ago</time></p>
     <form class="usertext"><div class="usertext-body"><div class="md"><p>${esc(text)}</p></div></div></form>
@@ -163,7 +166,9 @@ export function oldCommentsPage() {
   </div>
   <div class="child">${children}</div>
 </div>`;
-  return `<!doctype html><html><head><meta charset="utf-8"><title>old fixture</title></head><body>
+  // old.reddit's own rule for collapsed comments.
+  return `<!doctype html><html><head><meta charset="utf-8"><title>old fixture</title>
+<style>.comment.collapsed > .entry .usertext, .comment.collapsed > .entry .flat-list, .comment.collapsed > .child { display: none }</style></head><body>
 <div class="thing link self" data-fullname="t3_old1" data-author="op_user">
   <div class="entry">
     <p class="title"><a class="title" href="/r/test/comments/old1/">Is remote work here to stay?</a></p>

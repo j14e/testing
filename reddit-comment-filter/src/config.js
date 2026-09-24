@@ -25,7 +25,7 @@ export const CONFIG = {
   // yellow from midScore, red from highScore. midScore is also the AI/Not AI cut.
   highScore: 0.8,
   midScore: 0.5,
-  // Collapse items at or above this score automatically (null = only when the pill
-  // is clicked).
-  autoBlockThreshold: null,
+  // Collapse the thread when the AI score is above this (0.3 = 30%); null
+  // turns it off. The pill toggles it either way.
+  collapseAbove: 0.3,
 };

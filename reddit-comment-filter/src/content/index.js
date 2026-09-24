@@ -43,7 +43,6 @@ function register(el) {
       io.unobserve(item.textEl);
       near.delete(item);
       Object.assign(item, info);
-      item.placeholder?.remove();
       item.group?.remove();
       item.note?.remove();
       if (item.status !== 'done') observe(item);

@@ -10,7 +10,7 @@ const OLD_COMMENT = '.thing.comment';
 export const ITEM_SELECTOR = [SHREDDIT_POST, SHREDDIT_COMMENT, OLD_POST, OLD_COMMENT].join(', ');
 // Elements this extension inserts. Some carry Reddit's slot names (so they
 // render inside shadow roots) and must never be mistaken for Reddit's own.
-export const OURS = '.rcf-group, .rcf-note, .rcf-placeholder';
+export const OURS = '.rcf-group, .rcf-note';
 const USER_LINK = 'a[href*="/user/"], a[href*="/u/"]';
 
 // First descendant matching `selector` that belongs to `item` itself rather
@@ -32,7 +32,8 @@ const ADAPTERS = [
       title: '',
       textEl:
         el.querySelector(`:scope > [slot="comment"]:not(${OURS})`) ?? own(el, '[id$="-comment-rtjson-content"]'),
-      metaEl: el.querySelector(':scope > [slot="commentMeta"]'),
+      // Newer markup nests the header in layout divs rather than slotting it directly.
+      metaEl: el.querySelector(':scope > [slot="commentMeta"]') ?? own(el, '[slot="commentMeta"]'),
     }),
   },
   {
@@ -127,5 +128,48 @@ export function authorLink(el, info) {
   const matchesAuthor = (a) =>
     a.getAttribute('href').toLowerCase().replace(/\/+$/, '').endsWith(`/${author}`) ||
     a.textContent.trim().replace(/^u\//i, '').toLowerCase() === author;
-  return (author && links.find(matchesAuthor)) || links[0] || null;
+  // The avatar also links to the profile; prefer the link showing the name.
+  const named = links.filter((a) => a.textContent.trim());
+  return (author && (named.find(matchesAuthor) ?? links.find(matchesAuthor))) || named[0] || links[0] || null;
+}
+
+// "Collapse the thread". Comments use Reddit's own collapse, which hides the
+// comment and its replies and keeps the username row. Posts have no such
+// state, so their text is hidden.
+//
+// <shreddit-comment> has shipped two ways: rendered in the page as a
+// <details> whose <summary> is the username row (Sep 2026), or with a shadow
+// root holding a ⊖ toggle button (Aug 2026). Without either (Reddit's JS not
+// loaded), fall back to its `collapsed` attribute.
+function shredditToggle(el) {
+  return {
+    details: el.querySelector(':scope > details'),
+    button: el.shadowRoot?.querySelector('button[aria-expanded]'),
+  };
+}
+
+export function isCollapsed(el, info) {
+  if (el.localName === SHREDDIT_COMMENT) {
+    const { details, button } = shredditToggle(el);
+    if (details) return !details.open;
+    if (button) return button.getAttribute('aria-expanded') === 'false';
+    return el.hasAttribute('collapsed');
+  }
+  if (el.matches(OLD_COMMENT)) return el.classList.contains('collapsed');
+  return info.textEl.classList.contains('rcf-hidden');
+}
+
+export function setCollapsed(el, info, collapsed) {
+  if (el.localName === SHREDDIT_COMMENT) {
+    if (isCollapsed(el, info) === collapsed) return;
+    const { details, button } = shredditToggle(el);
+    if (details) details.open = !collapsed;
+    else if (button) button.click();
+    else el.toggleAttribute('collapsed', collapsed);
+  } else if (el.matches(OLD_COMMENT)) {
+    el.classList.toggle('collapsed', collapsed);
+    el.classList.toggle('noncollapsed', !collapsed);
+  } else {
+    info.textEl.classList.toggle('rcf-hidden', collapsed);
+  }
 }

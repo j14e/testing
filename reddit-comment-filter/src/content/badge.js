@@ -1,13 +1,14 @@
 // What the extension adds to a scored post/comment:
 //  - next to the username, a verdict pill ("AI" / "Not AI") coloured by how
 //    likely the model thinks AI is: green low, yellow medium, red high. No
-//    percentages are shown. Clicking it collapses/expands the text.
+//    percentages are shown. Clicking it collapses/expands the thread.
 //  - beside it, two buttons for the reader's own call (placeholders: they
 //    only highlight the choice; nothing is stored or sent yet).
 //  - a small disclaimer line above the text.
+// Threads scoring above CONFIG.collapseAbove start collapsed.
 
 import { CONFIG } from '../config.js';
-import { authorLink } from './sites.js';
+import { authorLink, isCollapsed, setCollapsed } from './sites.js';
 
 const DISCLAIMER = 'Sorry, this classifier is very early, it can and will be wrong.';
 
@@ -53,26 +54,21 @@ function createGroup(item) {
   badge.className = 'rcf-badge';
   badge.addEventListener('click', (e) => {
     swallow(e);
-    if (item.result) setBlocked(item, !item.blocked);
+    if (item.result) collapse(item, !isCollapsed(item.el, item));
   });
 
   const votes = document.createElement('span');
   votes.className = 'rcf-votes';
   votes.hidden = true;
-  const label = document.createElement('span');
-  label.className = 'rcf-votes-label';
-  label.textContent = 'Your call:';
-  votes.append(label);
-  for (const [value, text, what] of [
-    ['ai', 'AI', 'AI-written'],
-    ['human', 'Not AI', 'written by a person'],
+  for (const [value, text] of [
+    ['ai', 'AI'],
+    ['human', 'Not AI'],
   ]) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'rcf-vote';
     button.dataset.rcfVote = value;
     button.textContent = text;
-    button.title = `Mark as ${what} (not saved yet)`;
     button.setAttribute('aria-pressed', 'false');
     button.addEventListener('click', (e) => {
       swallow(e);
@@ -93,11 +89,18 @@ function setVote(item, value) {
   }
 }
 
+function collapse(item, collapsed) {
+  setCollapsed(item.el, item, collapsed);
+  // Posts only hide their text; take the disclaimer with it. (A collapsed
+  // comment hides everything below its username row already.)
+  item.note?.classList.toggle('rcf-hidden', collapsed && item.kind === 'post');
+  item.badge.setAttribute('aria-pressed', String(collapsed));
+}
+
 export function ensureBadge(item) {
   if (!item.group) createGroup(item);
   if (!item.group.isConnected) placeGroup(item);
   if (item.note && !item.note.isConnected) insertNextTo(item.textEl, item.note, 'before');
-  if (item.blocked && !item.placeholder?.isConnected) setBlocked(item, true);
   return item.badge;
 }
 
@@ -105,7 +108,6 @@ export function showPending(item) {
   const badge = ensureBadge(item);
   badge.dataset.rcfLevel = 'pending';
   badge.textContent = '…';
-  badge.title = 'Reddit Comment Filter: checking…';
   badge.disabled = true;
   item.votes.hidden = true;
 }
@@ -122,12 +124,11 @@ export function showError(item, message) {
 export function showResult(item, result) {
   const badge = ensureBadge(item);
   const { label, score } = result;
-  const level = score >= CONFIG.highScore ? 'high' : score >= CONFIG.midScore ? 'medium' : 'low';
   badge.disabled = false;
-  badge.dataset.rcfLevel = level;
+  badge.dataset.rcfLevel = score >= CONFIG.highScore ? 'high' : score >= CONFIG.midScore ? 'medium' : 'low';
   badge.dataset.rcfScore = score.toFixed(4); // for tests/debugging; never displayed
   badge.textContent = score >= CONFIG.midScore ? label : `Not ${label}`;
-  badge.title = `${label} likelihood: ${level}\nClick to ${item.blocked ? 'show' : 'hide'} this ${item.kind}.`;
+  badge.setAttribute('aria-pressed', String(isCollapsed(item.el, item)));
   item.votes.hidden = false;
 
   if (!item.note) {
@@ -137,29 +138,9 @@ export function showResult(item, result) {
   }
   if (!item.note.isConnected) insertNextTo(item.textEl, item.note, 'before');
 
-  if (CONFIG.autoBlockThreshold != null && score >= CONFIG.autoBlockThreshold && item.blocked === undefined) {
-    setBlocked(item, true);
-  }
-}
-
-export function setBlocked(item, blocked) {
-  item.blocked = blocked;
-  item.textEl.classList.toggle('rcf-hidden', blocked);
-  item.badge.classList.toggle('rcf-blocked', blocked);
-  item.badge.setAttribute('aria-pressed', String(blocked));
-  item.badge.title = item.badge.title.replace(/Click to (show|hide)/, `Click to ${blocked ? 'show' : 'hide'}`);
-  if (blocked) {
-    if (!item.placeholder) {
-      item.placeholder = document.createElement('div');
-      item.placeholder.className = 'rcf-placeholder';
-      item.placeholder.textContent = `${item.kind === 'post' ? 'Post' : 'Comment'} collapsed (${item.badge.textContent}). Click to show.`;
-      item.placeholder.addEventListener('click', (e) => {
-        swallow(e);
-        setBlocked(item, false);
-      });
-    }
-    if (!item.placeholder.isConnected) insertNextTo(item.textEl, item.placeholder, 'after');
-  } else {
-    item.placeholder?.remove();
+  // Once per item, so a thread the reader expanded stays expanded.
+  if (!item.autoCollapsed && CONFIG.collapseAbove != null && score > CONFIG.collapseAbove) {
+    item.autoCollapsed = true;
+    collapse(item, true);
   }
 }
