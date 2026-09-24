@@ -6,6 +6,7 @@
 
 import { env, pipeline } from '@huggingface/transformers';
 import { CONFIG } from './config.js';
+import { encodeBatch } from './encode.js';
 
 const DEVICE_PREF = new URLSearchParams(location.search).get('device') || 'auto';
 const ORT_DIR = chrome.runtime.getURL('ort/');
@@ -101,7 +102,7 @@ async function loadEngine() {
       clf = await pipeline('text-classification', CONFIG.modelId, { device, dtype });
       // First run compiles WebGPU shaders / surfaces unsupported kernels, so a
       // backend only counts as working once it has produced an output.
-      await clf('warm up', { top_k: null });
+      await scoreBatch(clf, ['warm up']);
       Object.assign(status, {
         state: 'ready',
         modelClass: clf.model.constructor.name, // e.g. RobertaForSequenceClassification
@@ -130,6 +131,30 @@ function getEngine() {
   return enginePromise;
 }
 
+// [{label, score}] per text, highest first. Uses the pipeline's tokenizer and
+// model but our own encoding (see encode.js) instead of calling the pipeline.
+async function scoreBatch(clf, texts) {
+  const { config } = clf.model;
+  let { logits } = await clf.model(encodeBatch(clf.tokenizer, texts));
+  logits = logits.to('float32');
+  const [rows, classes] = logits.dims;
+  const out = [];
+  for (let i = 0; i < rows; i++) {
+    const z = Array.from(logits.data.subarray(i * classes, (i + 1) * classes));
+    let p;
+    if (config.problem_type === 'multi_label_classification') {
+      p = z.map((v) => 1 / (1 + Math.exp(-v)));
+    } else {
+      const max = Math.max(...z);
+      const e = z.map((v) => Math.exp(v - max));
+      const sum = e.reduce((a, b) => a + b);
+      p = e.map((v) => v / sum);
+    }
+    out.push(p.map((score, k) => ({ label: config.id2label?.[k] ?? `LABEL_${k}`, score })).sort((a, b) => b.score - a.score));
+  }
+  return out;
+}
+
 async function classify(texts) {
   const engine = await getEngine();
   let outputs;
@@ -138,9 +163,9 @@ async function classify(texts) {
     // and the other texts would shift each score. On CPU, batching buys little
     // anyway: run one text at a time.
     outputs = [];
-    for (const text of texts) outputs.push(...(await engine.clf([text], { top_k: null })));
+    for (const text of texts) outputs.push(...(await scoreBatch(engine.clf, [text])));
   } else {
-    outputs = await engine.clf(texts, { top_k: null });
+    outputs = await scoreBatch(engine.clf, texts);
   }
   status.classified += texts.length;
   return outputs.map((scores) => {

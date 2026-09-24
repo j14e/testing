@@ -85,8 +85,11 @@ runs every check twice, once with WebGPU forced and once with WASM forced:
 
 - The model loads as `RobertaForSequenceClassification` on the requested
   backend, cross-origin isolated, with WASM threads.
-- Batched browser scores match onnxruntime (Python) within 0.002. This includes
-  a 1,380-word text that must be truncated to 512 tokens.
+- The extension's token IDs match Python's exactly, including a 1,380-word text
+  cut to 512 tokens. transformers.js 4.3 drops RoBERTa's closing `</s>` when
+  it truncates (a 480-word post scored 0.512 instead of 0.476), so the
+  extension does its own encoding (`src/encode.js`).
+- Batched browser scores match onnxruntime (Python) within 0.002.
 - Only items within the viewport margin are scored at first. Far items are
   scored after scrolling. Comments added later are picked up.
 - A comment with exactly 50 words gets no badge; one with 51 words does.
@@ -119,7 +122,9 @@ JS/CSS render the page, so the markup is exactly what Reddit ships. The
 captures are downloaded into `test/.cache/` on the first run and never
 committed. The test checks:
 
-- Browser scores match onnxruntime within 0.005 on labelled Reddit answers.
+- The real tokenizer's IDs match Python's exactly, including texts past 512
+  tokens, and browser scores match onnxruntime within 0.005 on labelled Reddit
+  answers.
 - Every comment over 50 words in the thread is scored, with the badge right
   after its username, and only once it is near the viewport.
 - Feed posts over 50 words are scored next to the author.

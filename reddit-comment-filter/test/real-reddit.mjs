@@ -19,7 +19,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
+import { AutoTokenizer, env as hfEnv } from '@huggingface/transformers';
 import { chromium } from 'playwright';
+import { encodeBatch } from '../src/encode.js';
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const EXT = path.join(root, 'dist');
@@ -272,6 +274,23 @@ async function run(device, pages, expected) {
 fs.mkdirSync(ARTIFACTS, { recursive: true });
 const pages = { thread: await snapshot('thread'), feed: await snapshot('feed') };
 const expected = JSON.parse(fs.readFileSync(path.join(CACHE, 'real_expected.json'), 'utf8'));
+// Exact token ids vs Python, incl. two texts past 512 tokens. Scores alone
+// can't show a dropped </s> on clear-cut texts, so compare the ids.
+console.log('\n=== tokenization (real tokenizer) ===');
+hfEnv.localModelPath = path.join(root, 'models/');
+hfEnv.allowRemoteModels = false;
+const realTok = await AutoTokenizer.from_pretrained('fakespot-ai/roberta-base-ai-text-detection-v1');
+await check('token ids match the Python tokenizer, special tokens kept when truncating', () => {
+  const { input_ids, attention_mask } = encodeBatch(realTok, expected.texts);
+  const width = input_ids.dims[1];
+  expected.ids.forEach((py, i) => {
+    const row = Array.from(input_ids.data.slice(i * width, (i + 1) * width), Number);
+    const len = Array.from(attention_mask.data.slice(i * width, (i + 1) * width)).filter((m) => m === 1n).length;
+    assert.deepEqual(row.slice(0, len), py, `text ${i} (${py.length} tokens)`);
+  });
+});
+if (parityOnly && failures) process.exit(1);
+
 for (const device of devices) await run(device, pages, expected);
 console.log(failures ? `\n${failures} check(s) failed` : '\nall checks passed');
 process.exit(failures ? 1 : 0);

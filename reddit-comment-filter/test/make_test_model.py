@@ -160,7 +160,10 @@ def main() -> None:
         convert(str(hf_dir), MODEL_DIR, list(DTYPE_FILES))
 
     expected = reference_probs(MODEL_DIR, parity)
-    (OUT_ROOT / "expected.json").write_text(json.dumps({"texts": parity, "probs": expected}, indent=1))
+    # Token ids the Python tokenizer produces (special tokens kept on truncation);
+    # the extension's encoding must match them exactly.
+    ids = RobertaTokenizerFast.from_pretrained(MODEL_DIR)(parity, truncation=True)["input_ids"]
+    (OUT_ROOT / "expected.json").write_text(json.dumps({"texts": parity, "probs": expected, "ids": ids}, indent=1))
     for text, p in zip(parity, expected["fp32"]):
         print(f"AI={p[1]:.3f}  {text[:70]!r}")
 

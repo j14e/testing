@@ -10,7 +10,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { AutoTokenizer, env as hfEnv } from '@huggingface/transformers';
 import { chromium } from 'playwright';
+import { encodeBatch } from '../src/encode.js';
 import { EXPECT, oldCommentsPage, shredditComment, words, wwwCommentsPage, wwwFeedPage } from './fixtures.mjs';
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -261,6 +263,27 @@ async function runDevice(device) {
   }
 }
 
+// transformers.js 4.3 drops RoBERTa's closing </s> when it truncates; the
+// extension encodes itself and must produce exactly the Python token ids.
+// (The tiny model barely reacts to </s>, so score parity alone can't catch this.)
+async function checkTokenization() {
+  console.log('\n=== tokenization ===');
+  hfEnv.localModelPath = path.join(root, 'test/.models/');
+  hfEnv.allowRemoteModels = false;
+  const tok = await AutoTokenizer.from_pretrained('local-test/tiny-roberta');
+  await check('token ids match the Python tokenizer, special tokens kept when truncating', () => {
+    const { input_ids, attention_mask } = encodeBatch(tok, expected.texts);
+    const width = input_ids.dims[1];
+    expected.ids.forEach((py, i) => {
+      const row = Array.from(input_ids.data.slice(i * width, (i + 1) * width), Number);
+      const len = Array.from(attention_mask.data.slice(i * width, (i + 1) * width)).filter((m) => m === 1n).length;
+      assert.deepEqual(row.slice(0, len), py, `text ${i} (${py.length} tokens)`);
+    });
+    assert.ok(expected.ids.some((ids) => ids.length === 512), 'no parity text reaches the 512-token limit');
+  });
+}
+
+await checkTokenization();
 for (const device of devices) await runDevice(device);
 console.log(failures ? `\n${failures} check(s) failed` : '\nall checks passed');
 process.exit(failures ? 1 : 0);

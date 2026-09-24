@@ -40,6 +40,15 @@ def main() -> None:
             if answers:
                 samples.append((kind, clean(answers[0])))
 
+    # Two texts past the 512-token window, so truncation is exercised too.
+    for kind in ("human", "ai"):
+        parts = [t for k, t in samples if k == kind]
+        long_text, i = "", 0
+        while len(long_text.split()) < 600:
+            long_text += " " + parts[i]
+            i += 1
+        samples.append((kind, long_text.strip()))
+
     tok = AutoTokenizer.from_pretrained(MODEL_DIR)
     labels = np.array([k == "ai" for k, _ in samples])
     probs = {}
@@ -52,17 +61,21 @@ def main() -> None:
             e = np.exp(logits - logits.max())
             p.append(float(e[1] / e.sum()))
         probs[dtype] = np.array(p)
-        acc = ((probs[dtype] > 0.5) == labels).mean()
-        print(f"{dtype:5s} accuracy {acc:.3f} on {len(samples)} answers "
-              f"(mean AI score: human {probs[dtype][~labels].mean():.3f}, ChatGPT {probs[dtype][labels].mean():.3f})")
+        acc = ((probs[dtype][:-2] > 0.5) == labels[:-2]).mean()
+        print(f"{dtype:5s} accuracy {acc:.3f} on {len(samples) - 2} answers "
+              f"(mean AI score: human {probs[dtype][:-2][~labels[:-2]].mean():.3f}, ChatGPT {probs[dtype][:-2][labels[:-2]].mean():.3f})")
 
-    # The browser test replays 6 human + 6 ChatGPT answers.
-    idx = [i for i in range(len(samples)) if not labels[i]][:6] + [i for i in range(len(samples)) if labels[i]][:6]
+    # The browser test replays 6 human + 6 ChatGPT answers and the two long texts
+    # (last, so --parity-only's first/last pick includes one).
+    n = len(samples) - 2
+    idx = [i for i in range(n) if not labels[i]][:6] + [i for i in range(n) if labels[i]][:6] + [n, n + 1]
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps({
         "texts": [samples[i][1] for i in idx],
         "kinds": [samples[i][0] for i in idx],
         "probs": {d: [[1 - float(p[i]), float(p[i])] for i in idx] for d, p in probs.items()},
+        # Exact token ids (special tokens kept on truncation) for the encoding check.
+        "ids": [tok(samples[i][1], truncation=True)["input_ids"] for i in idx],
     }, indent=1))
     print(f"wrote {OUT.relative_to(ROOT)}")
 
