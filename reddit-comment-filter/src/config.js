@@ -18,13 +18,14 @@ export const CONFIG = {
   // The model only sees 512 tokens; don't ship megabytes of text to it.
   maxChars: 4000,
 
-  // Labels that count as the "flagged" class. The badge shows this class's
-  // probability, e.g. "AI 87%".
+  // Labels that count as the "flagged" class. The pill next to the username
+  // reads "<label>" or "Not <label>" (e.g. "AI" / "Not AI").
   flagLabelPattern: /\b(ai|fake|machine|generated|artificial|llm|gpt|chatgpt|bot|synthetic|toxic)\b|^label_1$/i,
-  // Badge colour bands for the flagged-class probability.
+  // Pill colour bands for the flagged-class probability: green below midScore,
+  // yellow from midScore, red from highScore. midScore is also the AI/Not AI cut.
   highScore: 0.8,
   midScore: 0.5,
-  // Hide items at or above this score automatically (null = only when the badge
+  // Collapse items at or above this score automatically (null = only when the pill
   // is clicked).
   autoBlockThreshold: null,
 };

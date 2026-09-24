@@ -83,9 +83,11 @@ function itemState(page, id) {
     if (!el) return null;
     const owner = (n) => n.closest('shreddit-comment, shreddit-post, .thing');
     const badge = [...el.querySelectorAll('.rcf-badge')].find((b) => owner(b) === el) ?? null;
+    const group = badge?.closest('.rcf-group');
+    const note = [...el.querySelectorAll('.rcf-note')].find((n) => owner(n) === el) ?? null;
+    const shown = (n) => !!n && n.getBoundingClientRect().width > 0 && n.getBoundingClientRect().height > 0;
     const rect = el.getBoundingClientRect();
-    const br = badge?.getBoundingClientRect();
-    const prev = badge?.previousElementSibling;
+    const prev = group?.previousElementSibling;
     const prevLink = prev?.matches('a') ? prev : prev?.querySelector('a');
     return {
       top: rect.top + scrollY,
@@ -93,13 +95,15 @@ function itemState(page, id) {
         text: badge.textContent,
         score: badge.dataset.rcfScore ? Number(badge.dataset.rcfScore) : null,
         level: badge.dataset.rcfLevel,
-        visible: br.width > 0 && br.height > 0,
-        slot: badge.slot,
-        parentSlot: badge.parentElement.getAttribute('slot'),
+        visible: shown(badge),
+        slot: group.slot,
         prevTag: prev?.localName ?? null,
         prevLinkHref: prevLink?.getAttribute('href') ?? null,
-        nextSlot: badge.nextElementSibling?.getAttribute('slot') ?? null,
-        insideBody: !!badge.closest('.md, [slot="comment"], [slot="text-body"]'),
+        insideBody: !!group.closest('.md, [slot="comment"], [slot="text-body"]'),
+        // Everything a reader can see or hover in the group, to check no percentage leaks.
+        visibleText: group.textContent + ' ' + [...group.querySelectorAll('[title]')].map((n) => n.title).join(' '),
+        votes: [...group.querySelectorAll('.rcf-vote')].filter(shown).map((b) => b.textContent),
+        note: note && { text: note.textContent, visible: shown(note), beforeText: note.nextElementSibling?.matches('.md, [slot="comment"], [slot="text-body"]') ?? false },
       },
     };
   }, id);
@@ -116,9 +120,16 @@ function assertScored(state, label, name) {
   assert.ok(state?.badge, `${name}: no badge`);
   assert.ok(state.badge.score != null, `${name}: badge not scored (${state.badge.text} / ${state.badge.level})`);
   assert.ok(state.badge.visible, `${name}: badge is not rendered (slotting?)`);
-  assert.match(state.badge.text, /^AI \d+%$/, `${name}: badge text ${state.badge.text}`);
   if (label === 'ai') assert.ok(state.badge.score > 0.5, `${name}: expected AI-like, got ${state.badge.score}`);
   if (label === 'human') assert.ok(state.badge.score < 0.5, `${name}: expected human-like, got ${state.badge.score}`);
+  // Verdict + colour band, never a number.
+  const { score, text, level } = state.badge;
+  assert.equal(text, score >= 0.5 ? 'AI' : 'Not AI', `${name}: verdict for ${score}`);
+  assert.equal(level, score >= 0.8 ? 'high' : score >= 0.5 ? 'medium' : 'low', `${name}: colour band for ${score}`);
+  assert.doesNotMatch(state.badge.visibleText, /\d\s*%|\d\.\d/, `${name}: a score is visible: ${state.badge.visibleText}`);
+  assert.deepEqual(state.badge.votes, ['AI', 'Not AI'], `${name}: vote buttons next to the verdict`);
+  assert.equal(state.badge.note?.text, 'Sorry, this classifier is very early, it can and will be wrong.', `${name}: disclaimer`);
+  assert.ok(state.badge.note.visible && state.badge.note.beforeText, `${name}: disclaimer not shown right above the text`);
 }
 
 async function runDevice(device) {
@@ -175,7 +186,7 @@ async function runDevice(device) {
       assertScored(states.fiftyOne, 'human', `fiftyOne (${MIN_WORDS + 1} words)`);
     });
 
-    await check('badge sits right after the author handle, in the item header', () => {
+    await check('verdict + vote buttons sit right after the author handle, in the item header', () => {
       for (const key of ['post', 'c1', 'c1r1', 'fiftyOne', 'linker']) {
         const b = states[key].badge;
         assert.ok(b, `${key}: no badge`);
@@ -210,7 +221,7 @@ async function runDevice(device) {
     await check('clicking the badge hides the text and does not open the post; clicking again restores it', async () => {
       await page.evaluate(() => scrollTo(0, 0));
       const badge = page.locator(`shreddit-post[id="${EXPECT.post.id}"] .rcf-badge`);
-      const body = page.locator(`shreddit-post[id="${EXPECT.post.id}"] [slot="text-body"]:not(.rcf-placeholder)`);
+      const body = page.locator(`shreddit-post[id="${EXPECT.post.id}"] [slot="text-body"]:not(.rcf-placeholder, .rcf-note, .rcf-group)`);
       const before = await page.evaluate(() => window.__postNavigations || 0);
       await badge.click();
       assert.equal(await body.isVisible(), false, 'text still visible after blocking');
@@ -220,6 +231,24 @@ async function runDevice(device) {
       await badge.click();
       assert.equal(await body.isVisible(), true, 'text not restored');
       assert.equal(await page.evaluate(() => window.__postNavigations || 0), before, 'badge click reached the post card');
+    });
+
+    await check('vote buttons are placeholders: they toggle one choice and do nothing else', async () => {
+      const scope = `shreddit-comment[thingid="${EXPECT.c1.id}"] > [slot="commentMeta"]`;
+      const ai = page.locator(`${scope} .rcf-vote[data-rcf-vote="ai"]`);
+      const human = page.locator(`${scope} .rcf-vote[data-rcf-vote="human"]`);
+      const body = page.locator(`shreddit-comment[thingid="${EXPECT.c1.id}"] > [slot="comment"]:not(.rcf-placeholder, .rcf-note, .rcf-group)`);
+      const pressed = async () => [await ai.getAttribute('aria-pressed'), await human.getAttribute('aria-pressed')];
+      await ai.click();
+      assert.deepEqual(await pressed(), ['true', 'false']);
+      await human.click();
+      assert.deepEqual(await pressed(), ['false', 'true']);
+      await human.click();
+      assert.deepEqual(await pressed(), ['false', 'false'], 'clicking the chosen button again clears it');
+      assert.equal(await body.isVisible(), true, 'voting must not collapse the comment');
+      const before = await page.evaluate(() => window.__postNavigations || 0);
+      await page.locator(`shreddit-post[id="${EXPECT.post.id}"] .rcf-vote[data-rcf-vote="ai"]`).click();
+      assert.equal(await page.evaluate(() => window.__postNavigations || 0), before, 'vote click reached the post card');
     });
 
     await check('home feed: badge on text posts without an author link, not on image posts', async () => {

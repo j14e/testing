@@ -86,22 +86,23 @@ function readItems(page, selector) {
   return page.evaluate(
     ({ selector, MIN_WORDS }) => {
       const OWNER = 'shreddit-post, shreddit-comment';
-      const own = (el, sel) => [...el.querySelectorAll(sel)].find((n) => n.closest(OWNER) === el) ?? null;
+      const OURS = '.rcf-group, .rcf-note, .rcf-placeholder';
+      const own = (el, sel) => [...el.querySelectorAll(sel)].find((n) => n.closest(OWNER) === el && !n.closest(OURS)) ?? null;
       const words = (node) => {
         if (!node) return 0;
         const clone = node.cloneNode(true);
-        clone.querySelectorAll('blockquote, pre, code, table, .rcf-badge, .rcf-placeholder').forEach((n) => n.remove());
+        clone.querySelectorAll(`blockquote, pre, code, table, ${OURS}`).forEach((n) => n.remove());
         clone.querySelectorAll('p, div, li, br, h1, h2, h3, h4, h5, h6').forEach((n) => n.append(' '));
         return clone.textContent.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
       };
       return [...document.querySelectorAll(selector)].map((el) => {
         const isPost = el.localName === 'shreddit-post';
-        const body = isPost ? own(el, '[slot="text-body"]') : el.querySelector(':scope > [slot="comment"]');
+        const body = isPost ? own(el, '[slot="text-body"]') : el.querySelector(`:scope > [slot="comment"]:not(${OURS})`);
         const title = isPost ? (el.getAttribute('post-title') ?? '') : '';
         const n = words(body) + (title ? title.split(/\s+/).filter(Boolean).length : 0);
         const badge = [...el.querySelectorAll('.rcf-badge')].find((b) => b.closest(OWNER) === el) ?? null;
         const r = badge?.getBoundingClientRect();
-        const prev = badge?.previousElementSibling;
+        const prev = badge?.closest('.rcf-group').previousElementSibling;
         const prevLink = prev?.matches('a') ? prev : prev?.querySelector('a[href*="/user/"]');
         return {
           id: el.getAttribute('thingid') ?? el.id,
@@ -239,13 +240,13 @@ async function run(device, pages, expected) {
       assertBadges(items, 'thread');
       const long = items.filter((i) => i.long);
       console.log(`      ${items.length} items, ${long.length} over ${MIN_WORDS} words, ${items.filter((i) => i.badge?.score != null).length} scored`);
-      for (const i of long) console.log(`        ${(i.badge?.text ?? '-').padEnd(8)} ${String(i.words).padStart(4)}w  ${i.author}`);
+      for (const i of long) console.log(`        ${(i.badge?.text ?? '-').padEnd(7)} ${(i.badge?.level ?? '').padEnd(7)} (${i.badge?.score?.toFixed(2)}) ${String(i.words).padStart(4)}w  ${i.author}`);
     });
 
     await check('real thread: badge hides and restores a real comment', async () => {
       const first = page.locator('shreddit-comment .rcf-badge[data-rcf-score]').first();
       await first.scrollIntoViewIfNeeded();
-      const body = first.locator('xpath=ancestor::shreddit-comment[1]').locator(':scope > [slot="comment"]:not(.rcf-placeholder)');
+      const body = first.locator('xpath=ancestor::shreddit-comment[1]').locator(':scope > [slot="comment"]:not(.rcf-group, .rcf-note, .rcf-placeholder)');
       await first.click();
       assert.equal(await body.isVisible(), false);
       await first.click();
@@ -258,7 +259,7 @@ async function run(device, pages, expected) {
       await scrollThrough(page);
       const items = await readItems(page, 'shreddit-post');
       assertBadges(items, 'feed');
-      for (const i of items) console.log(`        ${(i.badge?.text ?? '-').padEnd(8)} ${String(i.words).padStart(4)}w  ${i.author}`);
+      for (const i of items) console.log(`        ${(i.badge?.text ?? '-').padEnd(7)} ${(i.badge?.level ?? '').padEnd(7)} (${i.badge?.score?.toFixed(2) ?? '-'}) ${String(i.words).padStart(4)}w  ${i.author}`);
       await page.evaluate(() => scrollTo(0, 0));
       await page.waitForTimeout(500);
       await page.screenshot({ path: path.join(ARTIFACTS, `real-feed-${device}.png`) });

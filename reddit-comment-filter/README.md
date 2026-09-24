@@ -1,8 +1,19 @@
 # Reddit Comment Filter
 
 Chrome (MV3) extension that runs a RoBERTa text classifier locally in the
-browser and puts a score badge next to the username on long Reddit posts and
-comments. Clicking the badge hides the text; clicking again shows it.
+browser and marks long Reddit posts and comments as AI-written or not.
+
+What it adds to each scored post or comment:
+
+- **Next to the username:** a pill reading **AI** or **Not AI**. Its colour
+  gives a rough likelihood of AI: green is low (under 50%), yellow is medium
+  (50–80%), red is high (80% and up). No numbers are shown. Clicking the pill
+  collapses the text; clicking again shows it.
+- **Beside the pill:** "Your call: AI | Not AI", two buttons for the reader's
+  own judgement. They are placeholders for now: they highlight the choice on
+  the page and store or send nothing.
+- **Above the text:** "Sorry, this classifier is very early, it can and will
+  be wrong."
 
 - **Model:** any RoBERTa-family (`roberta`, `xlm-roberta`) sequence classifier
   from the Hugging Face Hub, loaded as `RobertaForSequenceClassification` by
@@ -59,7 +70,7 @@ chrome.storage.local.set({ device: 'wasm' }) // or 'webgpu' / 'auto'
 content script (reddit.com)                     offscreen document
   sites.js   find posts/comments, own text         transformers.js pipeline
   index.js   IntersectionObserver + queue  ─────►  WebGPU fp16/fp32 → WASM fp16
-  badge.js   badge after the username      ◄─────  {label, score, scores}
+  badge.js   verdict + votes by username   ◄─────  {label, score, scores}
                      │ ensure-offscreen
                      ▼
              background service worker (creates the offscreen document)
@@ -94,9 +105,13 @@ runs every check twice, once with WebGPU forced and once with WASM forced:
   scored after scrolling. Comments added later are picked up.
 - A comment with exactly 50 words gets no badge; one with 51 words does.
   Deleted comments get no badge.
-- The badge renders right after the author link, outside Reddit's hover-card
-  wrapper and never inside the text. On feed cards with no author link, it
-  goes above the text.
+- The verdict pill and vote buttons render right after the author link,
+  outside Reddit's hover-card wrapper and never inside the text. On feed cards
+  with no author link, they go above the text.
+- The pill reads AI/Not AI with the right colour band, and no percentage is
+  visible or in any tooltip. The disclaimer sits right above the text.
+- The vote buttons toggle one choice, and clicking a chosen button again
+  clears it. They don't collapse the comment or open the post.
 - Clicking the badge hides and restores the text, and doesn't trigger the post
   card's own click (which opens the post).
 - No console errors or CSP violations.

@@ -4,7 +4,7 @@
 
 import { CONFIG } from '../config.js';
 import { ensureBadge, showError, showPending, showResult } from './badge.js';
-import { ITEM_SELECTOR, itemText, readItem, wordCount } from './sites.js';
+import { ITEM_SELECTOR, OURS, itemText, readItem, wordCount } from './sites.js';
 
 const items = new WeakMap(); // item element -> state
 const byObserved = new WeakMap(); // observed text element -> state
@@ -43,8 +43,9 @@ function register(el) {
       io.unobserve(item.textEl);
       near.delete(item);
       Object.assign(item, info);
-      if (item.placeholder) item.placeholder.remove();
-      if (item.badge) item.badge.remove();
+      item.placeholder?.remove();
+      item.group?.remove();
+      item.note?.remove();
       if (item.status !== 'done') observe(item);
     }
     if (item.result && !item.badge?.isConnected) ensureBadge(item);
@@ -187,7 +188,7 @@ function scan() {
 new MutationObserver((mutations) => {
   for (const m of mutations) {
     for (const node of m.addedNodes) {
-      if (node.nodeType !== Node.ELEMENT_NODE || node.classList.contains('rcf-badge') || node.classList.contains('rcf-placeholder')) continue;
+      if (node.nodeType !== Node.ELEMENT_NODE || node.matches(OURS)) continue;
       pendingRoots.add(node);
     }
   }

@@ -8,13 +8,16 @@ const OLD_POST = '.thing.link';
 const OLD_COMMENT = '.thing.comment';
 
 export const ITEM_SELECTOR = [SHREDDIT_POST, SHREDDIT_COMMENT, OLD_POST, OLD_COMMENT].join(', ');
+// Elements this extension inserts. Some carry Reddit's slot names (so they
+// render inside shadow roots) and must never be mistaken for Reddit's own.
+export const OURS = '.rcf-group, .rcf-note, .rcf-placeholder';
 const USER_LINK = 'a[href*="/user/"], a[href*="/u/"]';
 
 // First descendant matching `selector` that belongs to `item` itself rather
 // than to a nested reply.
 function own(item, selector) {
   for (const node of item.querySelectorAll(selector)) {
-    if (node.closest(ITEM_SELECTOR) === item) return node;
+    if (node.closest(ITEM_SELECTOR) === item && !node.closest(OURS)) return node;
   }
   return null;
 }
@@ -28,7 +31,7 @@ const ADAPTERS = [
       author: el.getAttribute('author'),
       title: '',
       textEl:
-        el.querySelector(':scope > [slot="comment"]') ?? own(el, '[id$="-comment-rtjson-content"]'),
+        el.querySelector(`:scope > [slot="comment"]:not(${OURS})`) ?? own(el, '[id$="-comment-rtjson-content"]'),
       metaEl: el.querySelector(':scope > [slot="commentMeta"]'),
     }),
   },
@@ -85,7 +88,7 @@ export function readItem(el) {
 // Quotes, code and tables are left out: the detector was trained on text with
 // them stripped (its model card's clean_text), and they aren't the author's
 // own prose anyway.
-const SKIP = 'blockquote, pre, code, table, script, style, .rcf-badge, .rcf-placeholder';
+const SKIP = `blockquote, pre, code, table, script, style, ${OURS}`;
 const BREAKS = /^(p|div|li|ul|ol|h[1-6]|br|hr|tr)$/;
 
 function proseText(root) {

@@ -1,34 +1,48 @@
-.rcf-badge {
+.rcf-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 4px;
+  vertical-align: middle;
+  font: 600 11px/18px system-ui, -apple-system, 'Segoe UI', sans-serif;
+  white-space: nowrap;
+  /* Sit above the full-card link overlay on feed posts. */
+  position: relative;
+  z-index: 3;
+}
+
+.rcf-badge,
+.rcf-vote {
   all: unset;
   box-sizing: border-box;
   display: inline-flex;
   align-items: center;
   height: 18px;
-  margin: 0 4px;
   padding: 0 7px;
   border-radius: 9px;
-  font: 600 11px/18px system-ui, -apple-system, 'Segoe UI', sans-serif;
-  white-space: nowrap;
-  vertical-align: middle;
+  font: inherit;
+  cursor: pointer;
+}
+.rcf-badge:focus-visible,
+.rcf-vote:focus-visible {
+  outline: 2px solid #0969da;
+  outline-offset: 1px;
+}
+
+/* Verdict pill: colour = how likely the model thinks AI is. */
+.rcf-badge {
   color: #fff;
   background: #6e7781;
-  cursor: pointer;
-  /* Sit above the full-card link overlay on feed posts. */
-  position: relative;
-  z-index: 3;
 }
 .rcf-badge:disabled {
   cursor: default;
 }
-.rcf-badge:focus-visible {
-  outline: 2px solid #0969da;
-  outline-offset: 1px;
-}
 .rcf-badge[data-rcf-level='low'] {
   background: #1f883d;
 }
-.rcf-badge[data-rcf-level='mid'] {
-  background: #9a6700;
+.rcf-badge[data-rcf-level='medium'] {
+  color: #1f2328;
+  background: #e3b341;
 }
 .rcf-badge[data-rcf-level='high'] {
   background: #cf222e;
@@ -39,6 +53,36 @@
 .rcf-badge.rcf-blocked {
   box-shadow: inset 0 0 0 2px rgba(0, 0, 0, 0.35);
   text-decoration: line-through;
+}
+
+/* The reader's own call (placeholders for now). Mid-grey reads on light and dark themes. */
+.rcf-votes {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.rcf-votes[hidden] {
+  display: none;
+}
+.rcf-votes-label {
+  font-weight: 400;
+  color: #818b98;
+}
+.rcf-vote {
+  padding: 0 6px;
+  color: #818b98;
+  border: 1px solid currentColor;
+}
+.rcf-vote[aria-pressed='true'] {
+  color: #fff;
+  background: #57606a;
+  border-color: #57606a;
+}
+
+.rcf-note {
+  margin: 2px 0 4px;
+  font: italic 11px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: #818b98;
 }
 
 .rcf-hidden {
