@@ -123,7 +123,7 @@ async function check(name, fn) {
 function readItems(page) {
   return page.evaluate((MIN_WORDS) => {
     const OWNER = 'shreddit-post, shreddit-comment';
-    const OURS = '.rcf-group, .rcf-note';
+    const OURS = '.rcf-group, .rcf-note, .rcf-mask';
     const own = (el, sel) => [...el.querySelectorAll(sel)].find((n) => n.closest(OWNER) === el && !n.closest(OURS)) ?? null;
     const words = (node) => {
       if (!node) return 0;
@@ -133,7 +133,8 @@ function readItems(page) {
       return clone.textContent.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
     };
     const shown = (n) => !!n && n.checkVisibility();
-    return [...document.querySelectorAll(OWNER)].map((el) => {
+    const y0 = scrollY; // masks are scrolled into view to hit-test them
+    const items = [...document.querySelectorAll(OWNER)].map((el) => {
       const isPost = el.localName === 'shreddit-post';
       // Same lookup as the content script: newer markup nests the comment body
       // in layout divs, so fall back to its id.
@@ -147,6 +148,31 @@ function readItems(page) {
       const prev = group?.previousElementSibling;
       const prevLink = prev?.matches('a') ? prev : prev?.querySelector('a[href*="/user/"]');
       const replies = isPost ? [] : [...el.querySelectorAll('shreddit-comment')].filter((c) => c.parentElement.closest(OWNER) === el);
+      // Posts fold under a "Show anyway" mask over their title and text.
+      const titleEl = isPost ? own(el, '[slot="title"]') : null;
+      const maskEl = isPost ? [...el.querySelectorAll('.rcf-mask')].find((m) => m.closest(OWNER) === el) ?? null : null;
+      let mask = null;
+      if (shown(maskEl)) {
+        maskEl.scrollIntoView({ block: 'center' });
+        const m = maskEl.getBoundingClientRect();
+        const covers = (node) => {
+          const r = node.getBoundingClientRect();
+          return r.top >= m.top - 0.5 && r.bottom <= m.bottom + 0.5 && r.left >= m.left - 0.5 && r.right <= m.right + 0.5;
+        };
+        const cs = getComputedStyle(maskEl);
+        const c = m;
+        mask = {
+          text: maskEl.textContent,
+          color: cs.color,
+          weight: cs.fontWeight,
+          transform: cs.textTransform,
+          coversTitle: !!titleEl && covers(titleEl),
+          coversBody: !!body && covers(body),
+          // Reddit's card link or anything else must not sit over it.
+          onTop: document.elementFromPoint(c.left + c.width / 2, c.top + c.height / 2) === maskEl,
+        };
+      }
+      const blurred = (node) => !!node && getComputedStyle(node).filter.includes('blur');
       return {
         kind: isPost ? 'post' : 'comment',
         author: el.getAttribute('author'),
@@ -154,11 +180,14 @@ function readItems(page) {
         long: !!body && n > MIN_WORDS,
         top: el.getBoundingClientRect().top + scrollY,
         collapsed: isPost
-          ? !!body?.classList.contains('rcf-hidden')
+          ? shown(maskEl)
           : el.querySelector(':scope > details')
             ? !el.querySelector(':scope > details').open
             : (el.shadowRoot?.querySelector('button[aria-expanded]')?.getAttribute('aria-expanded') ?? (el.hasAttribute('collapsed') ? 'false' : 'true')) === 'false',
         bodyVisible: shown(body),
+        mask,
+        titleBlurred: blurred(titleEl),
+        bodyBlurred: blurred(body),
         replies: replies.length,
         repliesVisible: replies.filter(shown).length,
         badge: badge && {
@@ -176,6 +205,8 @@ function readItems(page) {
         },
       };
     });
+    scrollTo(0, y0);
+    return items;
   }, MIN_WORDS);
 }
 
@@ -224,8 +255,19 @@ function assertItems(items, label) {
       assert.deepEqual([l.border, l.shadow, l.outline], ['0px', 'none', 'none'], `${who}: outline ${JSON.stringify(l)}`);
     }
     const shouldCollapse = i.badge.score > FLAG_ABOVE;
-    assert.equal(i.collapsed, shouldCollapse, `${who}: collapsed=${i.collapsed} at ${i.badge.score}`);
-    assert.equal(i.bodyVisible, !shouldCollapse, `${who}: text visible=${i.bodyVisible} at ${i.badge.score}`);
+    assert.equal(i.collapsed, shouldCollapse, `${who}: folded=${i.collapsed} at ${i.badge.score}`);
+    if (i.kind === 'post') {
+      assert.equal(i.titleBlurred, shouldCollapse, `${who}: title blurred=${i.titleBlurred}`);
+      assert.equal(i.bodyBlurred, shouldCollapse, `${who}: text blurred=${i.bodyBlurred}`);
+      if (shouldCollapse) {
+        const m = i.mask;
+        assert.deepEqual([m.text, m.color, m.weight, m.transform], ['Show anyway', 'rgb(255, 255, 255)', '400', 'none'], `${who}: mask label ${JSON.stringify(m)}`);
+        assert.ok(m.coversTitle && m.coversBody, `${who}: mask does not cover title and text ${JSON.stringify(m)}`);
+        assert.ok(m.onTop, `${who}: something sits over the mask`);
+      }
+    } else {
+      assert.equal(i.bodyVisible, !shouldCollapse, `${who}: text visible=${i.bodyVisible} at ${i.badge.score}`);
+    }
     if (shouldCollapse) assert.equal(i.repliesVisible, 0, `${who}: replies still visible under a collapsed thread`);
   }
 }

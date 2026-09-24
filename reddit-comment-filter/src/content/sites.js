@@ -10,7 +10,7 @@ const OLD_COMMENT = '.thing.comment';
 export const ITEM_SELECTOR = [SHREDDIT_POST, SHREDDIT_COMMENT, OLD_POST, OLD_COMMENT].join(', ');
 // Elements this extension inserts. Some carry Reddit's slot names (so they
 // render inside shadow roots) and must never be mistaken for Reddit's own.
-export const OURS = '.rcf-group, .rcf-note';
+export const OURS = '.rcf-group, .rcf-note, .rcf-mask';
 const USER_LINK = 'a[href*="/user/"], a[href*="/u/"]';
 
 // First descendant matching `selector` that belongs to `item` itself rather
@@ -22,6 +22,14 @@ function own(item, selector) {
   return null;
 }
 
+// Slotted elements only render if they name a slot, so anything inserted next
+// to one has to carry the same slot name.
+export function insertNextTo(ref, node, where) {
+  if (ref.slot) node.slot = ref.slot;
+  else node.removeAttribute('slot');
+  ref[where](node);
+}
+
 const ADAPTERS = [
   {
     matches: (el) => el.localName === SHREDDIT_COMMENT,
@@ -30,6 +38,7 @@ const ADAPTERS = [
       id: el.getAttribute('thingid'),
       author: el.getAttribute('author'),
       title: '',
+      titleEl: null,
       textEl:
         el.querySelector(`:scope > [slot="comment"]:not(${OURS})`) ?? own(el, '[id$="-comment-rtjson-content"]'),
       // Newer markup nests the header in layout divs rather than slotting it directly.
@@ -43,6 +52,8 @@ const ADAPTERS = [
       id: el.getAttribute('id'),
       author: el.getAttribute('author'),
       title: el.getAttribute('post-title') ?? own(el, '[slot="title"]')?.textContent ?? '',
+      // <a> in feeds, <h1> on the post's own page.
+      titleEl: own(el, '[slot="title"]'),
       textEl: own(el, '[slot="text-body"]') ?? own(el, '[id$="-post-rtjson-content"]'),
       metaEl: own(el, '[slot="credit-bar"]'),
     }),
@@ -56,6 +67,7 @@ const ADAPTERS = [
         id: el.dataset.fullname ?? null,
         author: el.dataset.author ?? null,
         title: '',
+        titleEl: null,
         textEl: entry?.querySelector('.usertext-body .md') ?? null,
         metaEl: entry?.querySelector('.tagline') ?? null,
       };
@@ -70,6 +82,7 @@ const ADAPTERS = [
         id: el.dataset.fullname ?? null,
         author: el.dataset.author ?? null,
         title: entry?.querySelector('a.title')?.textContent ?? '',
+        titleEl: entry?.querySelector('p.title') ?? null,
         // Self-text; on listing pages it only exists once the post is expanded.
         textEl: entry?.querySelector('.expando .usertext-body .md') ?? null,
         metaEl: entry?.querySelector('.tagline') ?? null,
@@ -78,7 +91,7 @@ const ADAPTERS = [
   },
 ];
 
-// Returns {kind, id, author, title, textEl, metaEl} or null when the item has
+// Returns {kind, id, author, title, titleEl, textEl, metaEl} or null when the item has
 // no text body (link/image posts, bodies not rendered yet).
 export function readItem(el) {
   const adapter = ADAPTERS.find((a) => a.matches(el));
@@ -133,9 +146,9 @@ export function authorLink(el, info) {
   return (author && (named.find(matchesAuthor) ?? links.find(matchesAuthor))) || named[0] || links[0] || null;
 }
 
-// "Collapse the thread". Comments use Reddit's own collapse, which hides the
-// comment and its replies and keeps the username row. Posts have no such
-// state, so their text is hidden.
+// "Collapse the thread" for comments: Reddit's own collapse, which hides the
+// comment and its replies and keeps the username row. (Posts have no such
+// state; badge.js masks them instead.)
 //
 // <shreddit-comment> has shipped two ways: rendered in the page as a
 // <details> whose <summary> is the username row (Sep 2026), or with a shadow
@@ -148,28 +161,25 @@ function shredditToggle(el) {
   };
 }
 
-export function isCollapsed(el, info) {
+export function isCollapsed(el) {
   if (el.localName === SHREDDIT_COMMENT) {
     const { details, button } = shredditToggle(el);
     if (details) return !details.open;
     if (button) return button.getAttribute('aria-expanded') === 'false';
     return el.hasAttribute('collapsed');
   }
-  if (el.matches(OLD_COMMENT)) return el.classList.contains('collapsed');
-  return info.textEl.classList.contains('rcf-hidden');
+  return el.classList.contains('collapsed');
 }
 
-export function setCollapsed(el, info, collapsed) {
+export function setCollapsed(el, collapsed) {
   if (el.localName === SHREDDIT_COMMENT) {
-    if (isCollapsed(el, info) === collapsed) return;
+    if (isCollapsed(el) === collapsed) return;
     const { details, button } = shredditToggle(el);
     if (details) details.open = !collapsed;
     else if (button) button.click();
     else el.toggleAttribute('collapsed', collapsed);
-  } else if (el.matches(OLD_COMMENT)) {
+  } else {
     el.classList.toggle('collapsed', collapsed);
     el.classList.toggle('noncollapsed', !collapsed);
-  } else {
-    info.textEl.classList.toggle('rcf-hidden', collapsed);
   }
 }

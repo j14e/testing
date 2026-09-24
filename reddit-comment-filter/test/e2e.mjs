@@ -53,6 +53,8 @@ async function launch(device) {
   // Chromium may start other (built-in) service workers first.
   const isExt = (w) => w.url().endsWith('/background.js');
   const sw = ctx.serviceWorkers().find(isExt) ?? (await ctx.waitForEvent('serviceworker', { predicate: isExt }));
+  // Extension APIs can appear a moment after the worker itself.
+  for (let i = 0; i < 100 && !(await sw.evaluate(() => !!globalThis.chrome?.storage)); i++) await new Promise((r) => setTimeout(r, 100));
   await sw.evaluate((d) => chrome.storage.local.set({ device: d }), device);
 
   const pages = { '/': wwwFeedPage() };
@@ -88,14 +90,45 @@ function itemState(page, id) {
     const group = badge?.closest('.rcf-group');
     const note = [...el.querySelectorAll('.rcf-note')].find((n) => owner(n) === el) ?? null;
     const shown = (n) => !!n && n.checkVisibility();
-    const OURS = '.rcf-group, .rcf-note';
+    const OURS = '.rcf-group, .rcf-note, .rcf-mask';
     const body =
       el.querySelector(`:scope > [slot="comment"]:not(${OURS})`) ??
       [...el.querySelectorAll(`[slot="text-body"]:not(${OURS}), .entry .usertext-body .md`)].find((n) => owner(n) === el);
+    // Posts are folded with a "Show anyway" mask over the title and text.
+    const isPost = el.localName === 'shreddit-post' || el.matches('.link');
+    const title = isPost
+      ? [...el.querySelectorAll(`[slot="title"]:not(${OURS}), .entry p.title`)].find((n) => owner(n) === el) ?? null
+      : null;
+    const maskEl = [...el.querySelectorAll('.rcf-mask')].find((n) => owner(n) === el) ?? null;
     const collapsed =
       el.localName === 'shreddit-comment' ? el.hasAttribute('collapsed')
         : el.matches('.comment') ? el.classList.contains('collapsed')
-          : !!body?.classList.contains('rcf-hidden');
+          : shown(maskEl);
+    let mask = null;
+    if (maskEl && shown(maskEl)) {
+      const m = maskEl.getBoundingClientRect();
+      const covers = (n) => {
+        const r = n.getBoundingClientRect();
+        return r.top >= m.top - 0.5 && r.bottom <= m.bottom + 0.5 && r.left >= m.left - 0.5 && r.right <= m.right + 0.5;
+      };
+      const cs = getComputedStyle(maskEl);
+      const cx = m.left + m.width / 2;
+      const cy = m.top + m.height / 2;
+      mask = {
+        text: maskEl.textContent,
+        color: cs.color,
+        weight: cs.fontWeight,
+        transform: cs.textTransform,
+        bg: cs.backgroundColor,
+        backdrop: cs.backdropFilter,
+        coversTitle: !!title && covers(title),
+        coversBody: !!body && covers(body),
+        // The label is centred and the mask is what a click there hits.
+        centred: cs.display === 'flex' && cs.justifyContent === 'center' && cs.alignItems === 'center',
+        onTop: document.elementFromPoint(cx, cy) === maskEl,
+      };
+    }
+    const blurred = (n) => !!n && getComputedStyle(n).filter.includes('blur');
     const rect = el.getBoundingClientRect();
     const prev = group?.previousElementSibling;
     const prevLink = prev?.matches('a') ? prev : prev?.querySelector('a');
@@ -103,6 +136,10 @@ function itemState(page, id) {
       top: rect.top + scrollY,
       collapsed,
       bodyVisible: shown(body),
+      isPost,
+      mask,
+      titleBlurred: blurred(title),
+      bodyBlurred: blurred(body),
       badge: badge && {
         text: badge.textContent,
         score: badge.dataset.rcfScore ? Number(badge.dataset.rcfScore) : null,
@@ -162,9 +199,33 @@ function assertScored(state, label, name) {
   assert.deepEqual(state.badge.tooltips, [], `${name}: tooltips in the group`);
   assert.equal(state.badge.note?.text, 'Sorry, this classifier is very early, it can and will be wrong.', `${name}: disclaimer`);
   assert.ok(state.badge.note.beforeText, `${name}: disclaimer not right above the text`);
-  // Above 30%: the thread starts collapsed (text hidden); otherwise open.
-  assert.equal(state.collapsed, score > 0.3, `${name}: collapsed=${state.collapsed} at ${score}`);
-  assert.equal(state.bodyVisible, score <= 0.3, `${name}: text visible=${state.bodyVisible} at ${score}`);
+  // Above 30% (Maybe AI / AI) it starts folded; otherwise open.
+  const flagged = score > 0.3;
+  assert.equal(state.collapsed, flagged, `${name}: folded=${state.collapsed} at ${score}`);
+  if (state.isPost) {
+    // Posts: title and text blurred under one darkened mask with a centred,
+    // plain white "Show anyway".
+    assert.equal(state.titleBlurred, flagged, `${name}: title blurred=${state.titleBlurred} at ${score}`);
+    assert.equal(state.bodyBlurred, flagged, `${name}: text blurred=${state.bodyBlurred} at ${score}`);
+    if (flagged) {
+      const m = state.mask;
+      assert.ok(m, `${name}: no mask`);
+      assert.equal(m.text, 'Show anyway');
+      assert.equal(m.color, 'rgb(255, 255, 255)', `${name}: mask text colour`);
+      assert.equal(m.weight, '400', `${name}: mask text is bold`);
+      assert.equal(m.transform, 'none', `${name}: mask text transformed`);
+      assert.match(m.bg, /^rgba\(0, 0, 0, 0\.\d+\)$/, `${name}: mask not darkened (${m.bg})`);
+      assert.match(m.backdrop, /blur/, `${name}: mask backdrop not blurred`);
+      assert.ok(m.coversTitle, `${name}: mask does not cover the title`);
+      assert.ok(m.coversBody, `${name}: mask does not cover the text`);
+      assert.ok(m.centred, `${name}: label not centred`);
+      assert.ok(m.onTop, `${name}: something sits over the mask's centre`);
+    } else {
+      assert.equal(state.mask, null, `${name}: masked at ${score}`);
+    }
+  } else {
+    assert.equal(state.bodyVisible, !flagged, `${name}: text visible=${state.bodyVisible} at ${score}`);
+  }
   if (score <= 0.3) assert.ok(state.badge.note.visible, `${name}: disclaimer hidden on an open item`);
 }
 
@@ -262,18 +323,30 @@ async function runDevice(device) {
       assert.equal(await page.locator('.rcf-placeholder').count(), 0, 'placeholder text added');
     });
 
-    await check('clicking the pill expands a collapsed thread and collapses it again, without opening the post', async () => {
+    await check('"Show anyway" unmasks a post and the pill masks it again, without opening the post', async () => {
       await page.evaluate(() => scrollTo(0, 0));
-      const badge = page.locator(`shreddit-post[id="${EXPECT.post.id}"] .rcf-badge`);
-      const body = page.locator(`shreddit-post[id="${EXPECT.post.id}"] [slot="text-body"]:not(.rcf-note, .rcf-group)`);
+      const { id } = EXPECT.post;
+      const badge = page.locator(`shreddit-post[id="${id}"] .rcf-badge`);
+      const mask = page.locator(`shreddit-post[id="${id}"] .rcf-mask`);
       const before = await page.evaluate(() => window.__postNavigations || 0);
-      assert.equal(await body.isVisible(), false, 'AI post not collapsed on arrival');
+      assert.ok((await itemState(page, id)).mask, 'AI post not masked on arrival');
       assert.equal(await badge.getAttribute('aria-pressed'), 'true');
-      await badge.click();
-      assert.equal(await body.isVisible(), true, 'text not shown after clicking the pill');
+      await mask.click();
+      let s = await itemState(page, id);
+      assert.ok(!s.collapsed && !s.mask, '"Show anyway" did not remove the mask');
+      assert.ok(!s.titleBlurred && !s.bodyBlurred, 'title/text still blurred after "Show anyway"');
       assert.equal(await badge.getAttribute('aria-pressed'), 'false');
       await badge.click();
-      assert.equal(await body.isVisible(), false, 'text not collapsed again');
+      s = await itemState(page, id);
+      assert.ok(s.mask?.coversTitle && s.mask.coversBody && s.titleBlurred, 'pill did not mask the post again');
+      assert.equal(await badge.getAttribute('aria-pressed'), 'true');
+      await badge.click();
+      assert.equal((await itemState(page, id)).mask, null, 'pill did not unmask the post');
+      assert.equal(await page.evaluate(() => window.__postNavigations || 0), before, 'mask or pill click reached the post card');
+    });
+
+    await check('clicking the pill expands a collapsed comment thread', async () => {
+      const before = await page.evaluate(() => window.__postNavigations || 0);
       const reply = page.locator(`shreddit-comment[thingid="${EXPECT.c1r1.id}"]`);
       await reply.locator(':scope > [slot="commentMeta"] .rcf-badge').click();
       assert.equal(await reply.getAttribute('collapsed'), null, 'comment thread not expanded by the pill');
@@ -356,10 +429,15 @@ async function runDevice(device) {
       assertScored(human, 'human', 'feed human');
       assert.equal(ai.badge.slot, 'text-body', 'fallback badge must share the text-body slot to render');
       assert.equal((await itemState(page, 't3_feedimage')).badge, null);
-      const before = await page.evaluate(() => window.__postNavigations || 0);
-      await page.locator('shreddit-post[id="t3_feedai"] .rcf-badge').click();
-      assert.equal(await page.evaluate(() => window.__postNavigations || 0), before, 'badge click opened the post');
       await page.screenshot({ path: path.join(ARTIFACTS, `www-feed-${device}.png`) });
+      const before = await page.evaluate(() => window.__postNavigations || 0);
+      await page.locator('shreddit-post[id="t3_feedai"] .rcf-mask').click();
+      const shownAnyway = await itemState(page, 't3_feedai');
+      assert.ok(!shownAnyway.mask && !shownAnyway.titleBlurred && !shownAnyway.bodyBlurred, '"Show anyway" did not show the feed post');
+      assert.equal(await page.evaluate(() => window.__postNavigations || 0), before, '"Show anyway" opened the post');
+      await page.locator('shreddit-post[id="t3_feedai"] .rcf-badge').click();
+      assert.ok((await itemState(page, 't3_feedai')).mask, 'pill did not mask the feed post again');
+      assert.equal(await page.evaluate(() => window.__postNavigations || 0), before, 'badge click opened the post');
     });
 
     await check('old.reddit.com: post + nested comments scored, badge after a.author', async () => {

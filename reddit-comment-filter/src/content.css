@@ -6,9 +6,9 @@
   vertical-align: middle;
   font: 600 11px/18px system-ui, -apple-system, 'Segoe UI', sans-serif;
   white-space: nowrap;
-  /* Sit above the full-card link overlay on feed posts. */
+  /* Sit above the full-card link overlay on feed posts, and above the mask. */
   position: relative;
-  z-index: 3;
+  z-index: 4;
 }
 
 .rcf-badge,
@@ -71,6 +71,46 @@
 }
 .rcf-vote[aria-pressed='true'] {
   background: #1f2328;
+}
+
+/* Flagged posts: title and text blurred under one darkened "Show anyway" overlay. */
+.rcf-mask-host {
+  position: relative;
+}
+.rcf-masked {
+  filter: blur(6px);
+  pointer-events: none;
+  user-select: none;
+}
+.rcf-masked-text {
+  display: block;
+  max-height: 7em;
+  overflow: hidden;
+}
+.rcf-mask {
+  all: unset;
+  box-sizing: border-box;
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(6px);
+  color: #fff;
+  font: 400 14px/1.3 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  text-transform: none;
+  letter-spacing: normal;
+  cursor: pointer;
+}
+.rcf-above-mask {
+  position: relative;
+  z-index: 4;
+}
+.rcf-mask:focus-visible {
+  outline: 2px solid #0969da;
+  outline-offset: 1px;
 }
 
 .rcf-note {

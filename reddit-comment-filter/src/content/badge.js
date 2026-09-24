@@ -5,21 +5,15 @@
 //  - beside it, AI / Not AI buttons for the reader's own call, saved on this
 //    device (votes.js).
 //  - a small disclaimer line above the text.
-// Flagged threads ("Maybe AI" and "AI") start collapsed.
+// Flagged items ("Maybe AI" and "AI") start folded: comments collapse their
+// thread, posts get a "Show anyway" mask over the title and text (mask.js).
 
 import { CONFIG } from '../config.js';
-import { authorLink, isCollapsed, setCollapsed } from './sites.js';
+import { setMasked } from './mask.js';
+import { authorLink, insertNextTo, isCollapsed, setCollapsed } from './sites.js';
 import { loadVote, saveVote } from './votes.js';
 
 const DISCLAIMER = 'Sorry, this classifier is very early, it can and will be wrong.';
-
-// Slotted elements only render if they name a slot, so anything inserted next
-// to one has to carry the same slot name.
-function insertNextTo(ref, node, where) {
-  if (ref.slot) node.slot = ref.slot;
-  else node.removeAttribute('slot');
-  ref[where](node);
-}
 
 function placeGroup(item) {
   const link = authorLink(item.el, item);
@@ -55,7 +49,7 @@ function createGroup(item) {
   badge.className = 'rcf-badge';
   badge.addEventListener('click', (e) => {
     swallow(e);
-    if (item.result) collapse(item, !isCollapsed(item.el, item));
+    if (item.result) collapse(item, !isFolded(item));
   });
 
   const votes = document.createElement('span');
@@ -122,11 +116,18 @@ function levelFor(score) {
   return 'low';
 }
 
+function isFolded(item) {
+  return item.kind === 'post' ? !!item.masked : isCollapsed(item.el);
+}
+
 function collapse(item, collapsed) {
-  setCollapsed(item.el, item, collapsed);
-  // Posts only hide their text; take the disclaimer with it. (A collapsed
-  // comment hides everything below its username row already.)
-  item.note?.classList.toggle('rcf-hidden', collapsed && item.kind === 'post');
+  if (item.kind === 'post') {
+    // The disclaimer sits between title and text; keep it out of the mask.
+    item.note?.classList.toggle('rcf-hidden', collapsed);
+    setMasked(item, collapsed, () => collapse(item, false));
+  } else {
+    setCollapsed(item.el, collapsed);
+  }
   item.badge.setAttribute('aria-pressed', String(collapsed));
 }
 
@@ -134,6 +135,8 @@ export function ensureBadge(item) {
   if (!item.group) createGroup(item);
   if (!item.group.isConnected) placeGroup(item);
   if (item.note && !item.note.isConnected) insertNextTo(item.textEl, item.note, 'before');
+  // Reddit re-rendered a masked post: mask the new title and text.
+  if (item.masked && !item.mask?.isConnected) collapse(item, true);
   return item.badge;
 }
 
@@ -163,7 +166,7 @@ export function showResult(item, result, meta) {
   badge.dataset.rcfLevel = item.level;
   badge.dataset.rcfScore = score.toFixed(4); // for tests/debugging; never displayed
   badge.textContent = CONFIG.pillText[item.level];
-  badge.setAttribute('aria-pressed', String(isCollapsed(item.el, item)));
+  badge.setAttribute('aria-pressed', String(isFolded(item)));
   item.votes.hidden = false;
   restoreVote(item);
 

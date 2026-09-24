@@ -1,4 +1,4 @@
-# Reddit Comment Filter: prototype 0.2
+# Reddit Comment Filter: prototype 0.3
 
 A ready-to-load build of the extension with the Vanguard AI-text detector
 bundled. Everything runs on your computer; nothing is sent anywhere.
@@ -31,9 +31,11 @@ looking at:
   saved on your computer (see below).
 - Above the text: "Sorry, this classifier is very early, it can and will be
   wrong."
-- Anything flagged (Maybe AI or AI) starts collapsed. Comments collapse the
-  way Reddit's own collapse does (the username row stays, the comment and its
-  replies hide). Click the pill to expand or collapse again.
+- Anything flagged (Maybe AI or AI) starts hidden. Posts, in the feed and on
+  their own page, get a darkened blur over the title and text with **Show
+  anyway** in the middle: click it to see the post. Comments collapse the way
+  Reddit's own collapse does (the username row stays, the comment and its
+  replies hide). Click the pill to hide or show either again.
 
 ## Your votes
 
@@ -56,7 +58,7 @@ To copy them all as JSON (to paste into a file):
 chrome.storage.local.get(null).then((all) => copy(JSON.stringify(Object.values(all).filter((r) => r?.vote), null, 1)));
 ```
 
-## Updating from 0.1
+## Updating from an earlier version
 
 Download the repository again and replace the old `prototype/extension`
 folder with the new one, in the same place. Then click the reload arrow on

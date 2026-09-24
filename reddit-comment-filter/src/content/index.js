@@ -45,6 +45,7 @@ function register(el) {
       Object.assign(item, info);
       item.group?.remove();
       item.note?.remove();
+      item.mask?.remove();
       if (item.status !== 'done') observe(item);
     }
     if (item.result && !item.badge?.isConnected) ensureBadge(item);

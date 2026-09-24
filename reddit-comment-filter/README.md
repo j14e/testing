@@ -23,10 +23,14 @@ What it adds to each scored post or comment:
   own call. Votes are saved on the device (see [Saved votes](#saved-votes)).
 - **Above the text:** "Sorry, this classifier is very early, it can and will
   be wrong."
-- **Collapsed threads:** anything flagged (Maybe AI or AI, above 30%) starts
-  collapsed. Comments use Reddit's own thread collapse, which keeps the
-  username row and hides the comment and its replies; posts hide their text.
-  Clicking the pill collapses or expands it.
+- **Flagged items** (Maybe AI or AI, above 30%) start hidden:
+  - **Posts**, in the feed and on their own page, get a darkened blur over the
+    title and text with **Show anyway** in the middle. Clicking it shows the
+    post.
+  - **Comments** use Reddit's own thread collapse, which keeps the username
+    row and hides the comment and its replies.
+
+  Clicking the pill hides or shows the item again.
 
 - **Model:** [`ShantanuT01/vanguard-ai-text-detector`](https://huggingface.co/ShantanuT01/vanguard-ai-text-detector)
   (Vanguard, 2026, MIT license). It is ModernBERT-large (396M parameters)
@@ -130,6 +134,7 @@ content script (reddit.com)                     offscreen document
   sites.js   find posts/comments, own text         transformers.js pipeline
   index.js   IntersectionObserver + queue  ─────►  WebGPU fp16/fp32 → WASM fp16
   badge.js   verdict + votes by username   ◄─────  {label, score, scores}
+  mask.js    "Show anyway" mask on flagged posts
   votes.js   votes → chrome.storage.local
                      │ ensure-offscreen
                      ▼
@@ -172,8 +177,10 @@ runs every check twice, once with WebGPU forced and once with WASM forced:
 - The group shows only the verdict and the two vote buttons, with no other
   text and no tooltips. The pill reads Human, Maybe AI or AI with the
   matching colour for its score, and the disclaimer sits right above the text.
-- Anything above 30% starts collapsed with its replies hidden. The pill
-  expands and re-collapses it without opening the post.
+- Comments above 30% start collapsed with their replies hidden. Posts above
+  30% (feed cards included) are masked: title and text blurred, one darkened
+  overlay covering both, and a centred, plain white "Show anyway" on top.
+  Clicking it shows the post without opening it; the pill masks it again.
 - A vote is saved in `chrome.storage.local` with the item's id, link,
   subreddit, author, text, score, verdict and model. It is still pressed after
   a reload, and clicking it again deletes the record. Voting doesn't collapse
@@ -207,8 +214,9 @@ committed. The test checks:
 - Every post and comment over 50 words is scored, with the pill right after
   its username, and only once it is near the viewport. The pill reads Human,
   Maybe AI or AI for its score.
-- Exactly the items above 30% are collapsed, with their text and replies
-  actually hidden.
+- Exactly the items above 30% are hidden: comments collapsed with their text
+  and replies hidden, posts masked with the "Show anyway" overlay over their
+  title and text and nothing of Reddit's on top of it.
 - The pill toggles Reddit's own collapse on a real comment. Reddit has shipped
   comments two ways: a `<details>` element in the page (September 2026) and a
   shadow-DOM toggle button (August 2026). The extension drives whichever one
